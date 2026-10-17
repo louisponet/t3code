@@ -787,6 +787,9 @@ export type SourceControlWritingStyleSettings = typeof SourceControlWritingStyle
 export const BranchNamingMode = Schema.Literals(["static", "semantic", "custom"]);
 export type BranchNamingMode = typeof BranchNamingMode.Type;
 
+export const PullRequestRepository = Schema.Literals(["upstream", "origin"]);
+export type PullRequestRepository = typeof PullRequestRepository.Type;
+
 export interface BranchNamingOptions {
   mode: BranchNamingMode;
   prefix: string;
@@ -895,6 +898,7 @@ export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
   "branchNamePrefix",
   "branchNameInstructions",
   "pullRequestMergeMethod",
+  "pullRequestRepository",
   "sidebarAutoSettleOnMerge",
   "sidebarAutoSettleAfterDays",
   "sidebarAutoSettleKeepPullRequests",
@@ -938,6 +942,7 @@ export const ProjectSettingsOverrides = Schema.Struct({
   branchNamePrefix: Schema.optionalKey(TrimmedString),
   branchNameInstructions: Schema.optionalKey(TrimmedString),
   pullRequestMergeMethod: Schema.optionalKey(Schema.NullOr(PullRequestMergeMethod)),
+  pullRequestRepository: Schema.optionalKey(PullRequestRepository),
   sidebarAutoSettleOnMerge: Schema.optionalKey(Schema.Boolean),
   sidebarAutoSettleAfterDays: Schema.optionalKey(Schema.NullOr(SidebarAutoSettleAfterDays)),
   sidebarAutoSettleKeepPullRequests: Schema.optionalKey(Schema.Boolean),
@@ -1186,6 +1191,9 @@ export const ServerSettings = Schema.Struct({
 
   pullRequestMergeMethod: Schema.NullOr(PullRequestMergeMethod).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  pullRequestRepository: PullRequestRepository.pipe(
+    Schema.withDecodingDefault(Effect.succeed("upstream")),
   ),
 
   // The driver-specific config blob is `Schema.Unknown` at this layer so
@@ -1444,6 +1452,7 @@ export const ServerSettingsPatch = Schema.Struct({
   reviewGuideModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   reviewGuideInstructions: Schema.optionalKey(TrimmedString),
   pullRequestMergeMethod: Schema.optionalKey(Schema.NullOr(PullRequestMergeMethod)),
+  pullRequestRepository: Schema.optionalKey(PullRequestRepository),
   observability: Schema.optionalKey(
     Schema.Struct({
       otlpTracesUrl: Schema.optionalKey(TrimmedString),

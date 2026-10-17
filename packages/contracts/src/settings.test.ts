@@ -1086,6 +1086,23 @@ describe("ServerSettings.removeAgentCreditsOnMerge", () => {
   });
 });
 
+describe("PR repository settings", () => {
+  it("keeps upstream as the default for existing installations", () => {
+    expect(decodeServerSettings({}).pullRequestRepository).toBe("upstream");
+  });
+  it.each(["origin", "upstream"])("round-trips %s at environment and project scope", (remote) => {
+    const input = {
+      pullRequestRepository: remote,
+      projectSettingsOverrides: { project: { pullRequestRepository: remote } },
+    };
+    expect(encodeServerSettings(decodeServerSettings(input))).toMatchObject(input);
+    expect(decodeServerSettingsPatch(input)).toEqual(input);
+  });
+  it("rejects an unsupported remote", () => {
+    expect(() => decodeServerSettingsPatch({ pullRequestRepository: "other" })).toThrow();
+  });
+});
+
 describe("resolveProjectProviderInstanceEnabled", () => {
   const projectId = "project-a" as ProjectId;
   const instanceId = ProviderInstanceId.make("codex_work");

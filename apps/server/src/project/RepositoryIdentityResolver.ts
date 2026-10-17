@@ -5,6 +5,7 @@ import {
 } from "@t3tools/shared/git";
 import * as Cache from "effect/Cache";
 import * as Context from "effect/Context";
+import * as Data from "effect/Data";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -33,7 +34,7 @@ export class RepositoryIdentityResolver extends Context.Service<
   {
     readonly resolve: (
       cwd: string,
-      options?: { readonly refresh?: boolean },
+      options?: { readonly refresh?: boolean; readonly preferredRemote?: "upstream" | "origin" },
     ) => Effect.Effect<RepositoryIdentity | null>;
   }
 >()("t3/project/RepositoryIdentityResolver") {}
@@ -56,8 +57,9 @@ function parseRemoteFetchUrls(stdout: string): Map<string, string> {
 
 function pickPrimaryRemote(
   remotes: ReadonlyMap<string, string>,
+  preferredRemote: "upstream" | "origin",
 ): { readonly remoteName: string; readonly remoteUrl: string } | null {
-  for (const preferredRemoteName of ["upstream", "origin"] as const) {
+  for (const preferredRemoteName of [preferredRemote, "upstream", "origin"] as const) {
     const remoteUrl = remotes.get(preferredRemoteName);
     if (remoteUrl) {
       return { remoteName: preferredRemoteName, remoteUrl };
@@ -140,6 +142,7 @@ const resolveRepositoryIdentityFromCacheKey = Effect.fn(
   "RepositoryIdentityResolver.resolveFromCacheKey",
 )(function* (
   cacheKey: string,
+  preferredRemote: "upstream" | "origin",
 ): Effect.fn.Return<RepositoryIdentity | null, never, ProcessRunner.ProcessRunner> {
   const processRunner = yield* ProcessRunner.ProcessRunner;
   const remoteResult = yield* processRunner
@@ -154,11 +157,16 @@ const resolveRepositoryIdentityFromCacheKey = Effect.fn(
   }
 
   const remotes = parseRemoteFetchUrls(remoteResult.value.stdout);
-  const remote = pickPrimaryRemote(remotes);
+  const remote = pickPrimaryRemote(remotes, preferredRemote);
   return remote
     ? buildRepositoryIdentity({ ...remote, originUrl: remotes.get("origin"), rootPath: cacheKey })
     : null;
 });
+
+class RepositoryIdentityCacheKey extends Data.Class<{
+  readonly rootPath: string;
+  readonly preferredRemote: "upstream" | "origin";
+}> {}
 
 export const make = Effect.fn("RepositoryIdentityResolver.make")(function* (
   options: RepositoryIdentityResolverOptions = {},
@@ -183,9 +191,12 @@ export const make = Effect.fn("RepositoryIdentityResolver.make")(function* (
     { capacity: cacheCapacity, timeToLive },
   );
 
-  const repositoryIdentityCache = yield* Cache.makeWith<string, RepositoryIdentity | null>(
+  const repositoryIdentityCache = yield* Cache.makeWith<
+    RepositoryIdentityCacheKey,
+    RepositoryIdentity | null
+  >(
     (cacheKey) =>
-      resolveRepositoryIdentityFromCacheKey(cacheKey).pipe(
+      resolveRepositoryIdentityFromCacheKey(cacheKey.rootPath, cacheKey.preferredRemote).pipe(
         Effect.provideService(ProcessRunner.ProcessRunner, processRunner),
         Effect.filterOrElse(
           (identity): identity is null => identity === null,
@@ -198,8 +209,12 @@ export const make = Effect.fn("RepositoryIdentityResolver.make")(function* (
   const resolve: RepositoryIdentityResolver["Service"]["resolve"] = Effect.fnUntraced(
     function* (cwd, options) {
       if (options?.refresh) yield* Cache.invalidate(repositoryRootCache, cwd);
-      const cacheKey = yield* Cache.get(repositoryRootCache, cwd);
-      if (cacheKey === null) return null;
+      const rootPath = yield* Cache.get(repositoryRootCache, cwd);
+      if (rootPath === null) return null;
+      const cacheKey = new RepositoryIdentityCacheKey({
+        rootPath,
+        preferredRemote: options?.preferredRemote ?? "upstream",
+      });
       if (options?.refresh) yield* Cache.invalidate(repositoryIdentityCache, cacheKey);
       return yield* Cache.get(repositoryIdentityCache, cacheKey);
     },

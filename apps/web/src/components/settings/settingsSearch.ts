@@ -779,6 +779,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["pull request merge squash rebase last selected"],
   },
   {
+    id: "pull-request-repository",
+    title: "PR repository",
+    to: "/settings/source-control",
+    scope: "project-defaults",
+    searchTerms: ["pull requests origin upstream fork hide repository remote"],
+  },
+  {
     id: "source-control",
     title: "Source control",
     to: "/settings/source-control",

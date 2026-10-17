@@ -72,6 +72,7 @@ import {
   type PullRequestThreadCommentsResult,
   type PullRequestUpdateInput,
   type SourceControlProviderInfo,
+  type ServerSettings as ServerSettingsSnapshot,
   SourceControlProviderKind,
   type ThreadPullRequestKey,
 } from "@t3tools/contracts";
@@ -80,6 +81,7 @@ import { detectSourceControlProviderFromRemoteUrl } from "@t3tools/shared/source
 
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import { forkParked } from "../serverActivation.ts";
 import * as PullRequestFilesViewed from "../persistence/PullRequestFilesViewed.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
@@ -664,7 +666,9 @@ export const make = Effect.gen(function* () {
   };
 
   const listWorkspaceProjects = (
-    filter: Pick<PullRequestListInput, "projectId" | "projectIds" | "host">,
+    filter: Pick<PullRequestListInput, "projectId" | "projectIds" | "host"> & {
+      readonly repository?: string;
+    },
   ): Effect.Effect<WorkspaceProjects, PullRequestError> =>
     (filter.projectId === undefined
       ? projects.listShells(
@@ -681,16 +685,36 @@ export const make = Effect.gen(function* () {
           }),
       ),
       Effect.flatMap((projects) =>
-        Effect.forEach(
-          projects,
-          (project) =>
-            project.repositoryIdentity != null
-              ? Effect.succeed(project)
-              : repositoryIdentities
-                  .resolve(project.workspaceRoot)
-                  .pipe(Effect.map((repositoryIdentity) => ({ ...project, repositoryIdentity }))),
-          { concurrency: REPOSITORY_CONCURRENCY },
-        ),
+        Effect.gen(function* () {
+          const settings = yield* serverSettings.getSettings.pipe(
+            Effect.mapError(
+              (cause) =>
+                new PullRequestOperationError({
+                  operation: "listProjects",
+                  detail: "Could not read pull request repository settings.",
+                  cause,
+                }),
+            ),
+          );
+          return yield* Effect.forEach(
+            projects,
+            (project) => {
+              const preferredRemote = resolveProjectSettings(settings, project.id).settings
+                .pullRequestRepository;
+              const matchesReference =
+                filter.repository !== undefined &&
+                sourceControlRepositorySelector(project.repositoryIdentity)?.toLowerCase() ===
+                  filter.repository.trim().toLowerCase();
+              return (preferredRemote === "upstream" || matchesReference) &&
+                project.repositoryIdentity != null
+                ? Effect.succeed(project)
+                : repositoryIdentities
+                    .resolve(project.workspaceRoot, { preferredRemote })
+                    .pipe(Effect.map((repositoryIdentity) => ({ ...project, repositoryIdentity })));
+            },
+            { concurrency: REPOSITORY_CONCURRENCY },
+          );
+        }),
       ),
       Effect.flatMap((projects) =>
         refineUnknownProjectKinds(projects, filter).pipe(
@@ -765,7 +789,7 @@ export const make = Effect.gen(function* () {
    * repository.
    */
   const requireProject = (ref: PullRequestRef): Effect.Effect<SupportedProject, PullRequestError> =>
-    listWorkspaceProjects({ projectId: ref.projectId }).pipe(
+    listWorkspaceProjects({ projectId: ref.projectId, repository: ref.repository }).pipe(
       Effect.flatMap(({ supported }): Effect.Effect<SupportedProject, PullRequestError> => {
         const own = supported[0];
         const repository = ref.repository.trim();
@@ -3204,6 +3228,27 @@ export const make = Effect.gen(function* () {
       yield* SubscriptionRef.set(pullRequestRefreshes, ++epochCounter);
     }
   });
+
+  const repositorySettingsKey = (settings: ServerSettingsSnapshot) =>
+    JSON.stringify([
+      settings.pullRequestRepository,
+      Object.entries(settings.projectSettingsOverrides)
+        .filter(([, overrides]) => overrides.pullRequestRepository !== undefined)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([projectId, overrides]) => [projectId, overrides.pullRequestRepository]),
+    ]);
+  const settingsChanges = yield* serverSettings.subscribeChanges;
+  let lastRepositorySettings = repositorySettingsKey(
+    yield* serverSettings.getSettings.pipe(Effect.orDie),
+  );
+  yield* forkParked(
+    Stream.runForEach(settingsChanges, (settings) => {
+      const key = repositorySettingsKey(settings);
+      if (key === lastRepositorySettings) return Effect.void;
+      lastRepositorySettings = key;
+      return invalidate({}, { notifyReaders: true });
+    }),
+  );
 
   const refreshAfterTurn: PullRequestService["Service"]["refreshAfterTurn"] = (projectId) =>
     Effect.suspend(() => {

@@ -54,6 +54,7 @@ const PAGE_PROJECT_KEYS: Record<SettingsPage, readonly ProjectScopedServerSettin
   "source-control": [
     "defaultAutoPull",
     "removeAgentCreditsOnMerge",
+    "pullRequestRepository",
     "newWorktreesStartFromOrigin",
     "branchNamingMode",
     "branchNamePrefix",
@@ -347,6 +348,33 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
 
               {props.page === "source-control" ? (
                 <>
+                  <SettingsSection
+                    title="PR repository"
+                    trailing={
+                      pendingWrites === 0 && isMixed("pullRequestRepository") ? (
+                        <MixedValuesLabel projectSelected={projectSelected} />
+                      ) : null
+                    }
+                  >
+                    {(["upstream", "origin"] as const).map((remote, index) => (
+                      <SettingsChoiceRow
+                        key={remote}
+                        label={remote === "origin" ? "Origin (your fork)" : "Upstream"}
+                        description={
+                          remote === "origin"
+                            ? "List pull requests from your fork. Uses upstream if origin is missing."
+                            : "List upstream pull requests. Uses origin if upstream is missing."
+                        }
+                        selected={
+                          !isMixed("pullRequestRepository") &&
+                          uniform("pullRequestRepository") === remote
+                        }
+                        separated={index > 0}
+                        disabled={disabledFor("pullRequestRepository")}
+                        onPress={() => write({ pullRequestRepository: remote })}
+                      />
+                    ))}
+                  </SettingsSection>
                   <BranchNamingSettings
                     key={targets
                       .map((target) => `${target.environment.environmentId}:${target.projectId}`)

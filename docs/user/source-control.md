@@ -220,6 +220,11 @@ Open **Pull requests** to review changes and comments, request reviewers, check 
 or merge. You can edit review titles and descriptions and your own comments where the host allows it.
 GitLab calls these merge requests.
 
+To list PRs from your fork, open **Settings → Source Control**, select the project,
+and set **PR repository** to **Origin (your fork)**. **Upstream** is the default.
+You can also change the environment default and override it for individual projects.
+If the selected remote is missing, T3 uses an available remote.
+
 On mobile, **Pull requests** lists reviews across your connected environments. Open a review
 to read its description, activity, commits, and changed files. Line comments stay as drafts
 until you submit the review. **Work on PR** opens a chat with the review attached; sending

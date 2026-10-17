@@ -40,6 +40,37 @@ const layerRepositoryIdentityResolverTest = (options: {
   ).pipe(Layer.provide(ProcessRunner.layer));
 
 it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
+  it.effect(
+    "caches each remote preference independently and falls back when a remote is missing",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "t3-pr-repository-" });
+        yield* git(cwd, ["init"]);
+        yield* git(cwd, ["remote", "add", "origin", "git@github.com:me/fork.git"]);
+        yield* git(cwd, ["remote", "add", "upstream", "git@github.com:team/project.git"]);
+        const resolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
+        const upstream = yield* resolver.resolve(cwd);
+        const origin = yield* resolver.resolve(cwd, { preferredRemote: "origin" });
+        expect(upstream?.canonicalKey).toBe("github.com/team/project");
+        expect(origin?.canonicalKey).toBe("github.com/me/fork");
+        expect(origin?.locator.remoteName).toBe("origin");
+        expect(yield* resolver.resolve(cwd)).toBe(upstream);
+        expect(yield* resolver.resolve(cwd, { preferredRemote: "origin" })).toBe(origin);
+        yield* git(cwd, ["remote", "remove", "origin"]);
+        expect(
+          (yield* resolver.resolve(cwd, { preferredRemote: "origin", refresh: true }))
+            ?.canonicalKey,
+        ).toBe("github.com/team/project");
+        yield* git(cwd, ["remote", "add", "origin", "git@github.com:me/fork.git"]);
+        yield* git(cwd, ["remote", "remove", "upstream"]);
+        expect(
+          (yield* resolver.resolve(cwd, { preferredRemote: "upstream", refresh: true }))
+            ?.canonicalKey,
+        ).toBe("github.com/me/fork");
+      }).pipe(Effect.provide(RepositoryIdentityResolver.layer)),
+  );
+
   it.effect("refreshes the Git root only when requested", () => {
     const calls: Array<ReadonlyArray<string>> = [];
     let rootPath = "/repo";

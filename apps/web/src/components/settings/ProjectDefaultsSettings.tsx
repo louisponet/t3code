@@ -81,6 +81,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
   const mixedAutoPull = useScopedSettingsMixed(["defaultAutoPull"]);
   const mixedAgentCredits = useScopedSettingsMixed(["removeAgentCreditsOnMerge"]);
   const mixedMergeMethod = useScopedSettingsMixed(["pullRequestMergeMethod"]);
+  const mixedPrRepository = useScopedSettingsMixed(["pullRequestRepository"]);
   const modelSource = useScopedSettingSource(["defaultModelSelection"]);
   const isProjectScope = scope.kind === "project" || scope.kind === "checkout";
   const unavailable = connectedEnvironments.length === 0;
@@ -381,6 +382,45 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
         </>
       ) : category === "source-control" ? (
         <>
+          <SettingsRow
+            serverScoped
+            settingKeys={["pullRequestRepository"]}
+            mixed={mixedPrRepository}
+            {...searchableSetting("pull-request-repository")}
+            description="Choose which repository supplies the pull request list. If the chosen remote is missing, T3 uses the available repository."
+            resetAction={
+              settings.pullRequestRepository !== DEFAULT_SERVER_SETTINGS.pullRequestRepository ? (
+                <SettingResetButton
+                  label="PR repository"
+                  tooltip="Reset to upstream"
+                  onClick={() => updateSettings({ pullRequestRepository: "upstream" })}
+                />
+              ) : null
+            }
+            control={
+              <Select
+                value={mixedPrRepository ? null : settings.pullRequestRepository}
+                onValueChange={(value) => {
+                  if (value === "origin" || value === "upstream")
+                    updateSettings({ pullRequestRepository: value });
+                }}
+              >
+                <SelectTrigger size="sm" aria-label="PR repository">
+                  <SelectValue>
+                    {mixedPrRepository
+                      ? "Mixed"
+                      : settings.pullRequestRepository === "origin"
+                        ? "Origin (your fork)"
+                        : "Upstream"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  <SelectItem value="upstream">Upstream</SelectItem>
+                  <SelectItem value="origin">Origin (your fork)</SelectItem>
+                </SelectPopup>
+              </Select>
+            }
+          />
           <SettingsRow
             serverScoped
             settingKeys={["defaultAutoPull"]}

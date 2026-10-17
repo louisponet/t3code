@@ -22,6 +22,31 @@ const projectId = ProjectId.make("project-a");
 const otherProjectId = ProjectId.make("project-b");
 
 describe("resolveProjectSettings", () => {
+  it("inherits and resets the PR repository independently for each project", () => {
+    const environment = { ...DEFAULT_SERVER_SETTINGS, pullRequestRepository: "origin" as const };
+    const overridden = {
+      ...environment,
+      projectSettingsOverrides: withProjectSettingsOverrides(environment, projectId, {
+        pullRequestRepository: "upstream",
+      }),
+    };
+    expect(resolveProjectSettings(overridden, projectId).settings.pullRequestRepository).toBe(
+      "upstream",
+    );
+    expect(resolveProjectSettings(overridden, otherProjectId).settings.pullRequestRepository).toBe(
+      "origin",
+    );
+    const reset = {
+      ...overridden,
+      projectSettingsOverrides: withProjectSettingsOverrides(
+        overridden,
+        projectId,
+        clearProjectSettingsOverrides(overridden, projectId, ["pullRequestRepository"]),
+      ),
+    };
+    expect(resolveProjectSettings(reset, projectId).settings.pullRequestRepository).toBe("origin");
+  });
+
   it("inherits every scopable key when the project has no overrides", () => {
     const resolved = resolveProjectSettings(DEFAULT_SERVER_SETTINGS, projectId);
     expect(resolved.settings).toBe(DEFAULT_SERVER_SETTINGS);

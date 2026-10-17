@@ -13,6 +13,7 @@ import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as PubSub from "effect/PubSub";
 import * as Redacted from "effect/Redacted";
 import * as Stream from "effect/Stream";
 import { HttpClient, HttpClientResponse } from "effect/http";
@@ -526,6 +527,10 @@ function fakeProvider(
 
 function makeService(input: {
   readonly settings?: ServerSettings;
+  readonly settingsService?: Pick<
+    ServerSettingsService.ServerSettingsService["Service"],
+    "getSettings" | "subscribeChanges"
+  >;
   readonly projects: ReadonlyArray<OrchestrationProjectShell>;
   readonly providers: ReadonlyArray<PullRequestProviderApi>;
   readonly resolveHandle?: SourceControlProviderRegistry.SourceControlProviderRegistry["Service"]["resolveHandle"];
@@ -538,6 +543,8 @@ function makeService(input: {
       Layer.mergeAll(
         Layer.mock(ServerSettingsService.ServerSettingsService)({
           getSettings: Effect.succeed(input.settings ?? DEFAULT_SERVER_SETTINGS),
+          subscribeChanges: Effect.succeed(Stream.empty),
+          ...input.settingsService,
         }),
         Layer.succeed(
           PullRequestProviderRegistry.PullRequestProviderRegistry,
@@ -570,6 +577,130 @@ function makeService(input: {
     (context) => Effect.provideContext(PullRequestService.make, context),
   );
 }
+
+it.effect("uses the environment PR repository with independent project overrides", () =>
+  Effect.gen(function* () {
+    const first = project({ id: "p1", title: "one", workspaceRoot: "/a", repository: "team/one" });
+    const second = project({ id: "p2", title: "two", workspaceRoot: "/b", repository: "team/two" });
+    const service = yield* makeService({
+      settings: {
+        ...DEFAULT_SERVER_SETTINGS,
+        pullRequestRepository: "origin",
+        projectSettingsOverrides: { [second.id]: { pullRequestRepository: "upstream" } },
+      },
+      projects: [first, second],
+      resolveRepositoryIdentity: (cwd, options) => {
+        assert.strictEqual(cwd, first.workspaceRoot);
+        assert.strictEqual(options?.preferredRemote, "origin");
+        return Effect.succeed(project({ ...first, repository: "me/one" }).repositoryIdentity!);
+      },
+      providers: [
+        fakeProvider(SourceControlProviderKind.make("github"), {
+          getChangeRequestSummary: () => Effect.succeed(changeRequest(1, "2026-07-02T00:00:00Z")),
+          listChangeRequests: () =>
+            Effect.succeed({
+              items: [changeRequest(1, "2026-07-02T00:00:00Z")],
+              truncated: false,
+              continues: false,
+            }),
+        }),
+      ],
+    });
+    const result = yield* service.list({ state: "open" });
+    assert.deepStrictEqual(result.entries.map((entry) => entry.repository).sort(), [
+      "me/one",
+      "team/two",
+    ]);
+    assert.strictEqual(first.repositoryIdentity?.displayName, "team/one");
+    const upstream = yield* service.summary({
+      projectId: first.id,
+      repository: "team/one",
+      number: 1,
+    });
+    assert.strictEqual(upstream.repository, "team/one");
+    const origin = yield* service.summary({
+      projectId: first.id,
+      repository: "me/one",
+      number: 1,
+    });
+    assert.strictEqual(origin.repository, "me/one");
+  }),
+);
+
+it.effect("refreshes cached PR lists when repository preferences change or reset", () =>
+  Effect.gen(function* () {
+    let settings: ServerSettings = DEFAULT_SERVER_SETTINGS;
+    const changes = yield* PubSub.unbounded<{
+      readonly settings: ServerSettings;
+      readonly processed: Deferred.Deferred<void>;
+    }>();
+    const listed: string[] = [];
+    const first = project({ id: "p1", title: "one", workspaceRoot: "/a", repository: "team/one" });
+    const service = yield* makeService({
+      settingsService: {
+        getSettings: Effect.sync(() => settings),
+        subscribeChanges: PubSub.subscribe(changes).pipe(
+          Effect.map((subscription) =>
+            Stream.fromSubscription(subscription).pipe(
+              Stream.flatMap((change) =>
+                Stream.succeed(change.settings).pipe(
+                  Stream.ensuring(Deferred.succeed(change.processed, undefined)),
+                ),
+              ),
+            ),
+          ),
+        ),
+      },
+      projects: [first],
+      resolveRepositoryIdentity: () =>
+        Effect.succeed(project({ ...first, repository: "me/one" }).repositoryIdentity!),
+      providers: [
+        fakeProvider(SourceControlProviderKind.make("github"), {
+          listChangeRequests: ({ repository }) => {
+            listed.push(repository);
+            return Effect.succeed({
+              items: [changeRequest(1, "2026-07-02T00:00:00Z")],
+              truncated: false,
+              continues: false,
+            });
+          },
+        }),
+      ],
+    });
+    const update = Effect.fnUntraced(function* (next: ServerSettings) {
+      settings = next;
+      const processed = yield* Deferred.make<void>();
+      yield* PubSub.publish(changes, { settings, processed });
+      yield* Deferred.await(processed);
+    });
+    const repositories = Effect.suspend(() => service.list({ state: "open" })).pipe(
+      Effect.map((result) => result.entries.map((entry) => entry.repository)),
+    );
+
+    assert.deepStrictEqual(yield* repositories, ["team/one"]);
+    yield* update({ ...settings, defaultAutoPull: !settings.defaultAutoPull });
+    assert.deepStrictEqual(yield* repositories, ["team/one"]);
+    assert.deepStrictEqual(listed, ["team/one"]);
+
+    yield* update({ ...settings, pullRequestRepository: "origin" });
+    const firstRefresh = Option.getOrThrow(yield* Stream.runHead(service.subscribeRefreshes));
+    assert.deepStrictEqual(yield* repositories, ["me/one"]);
+    yield* update({
+      ...settings,
+      projectSettingsOverrides: { [first.id]: { pullRequestRepository: "upstream" } },
+    });
+    assert.deepStrictEqual(yield* repositories, ["team/one"]);
+    yield* update({ ...settings, projectSettingsOverrides: {} });
+    assert.deepStrictEqual(yield* repositories, ["me/one"]);
+    yield* update({ ...settings, pullRequestRepository: "upstream" });
+    assert.deepStrictEqual(yield* repositories, ["team/one"]);
+    assert.isAbove(
+      Option.getOrThrow(yield* Stream.runHead(service.subscribeRefreshes)),
+      firstRefresh,
+    );
+    assert.deepStrictEqual(listed, ["team/one", "me/one", "team/one", "me/one", "team/one"]);
+  }),
+);
 
 it.effect("lists GitHub Enterprise PRs for a stored unknown repository after host discovery", () =>
   Effect.gen(function* () {

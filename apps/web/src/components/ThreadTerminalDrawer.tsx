@@ -1,4 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
+import { isHelixReviewTerminal } from "@t3tools/client-runtime/helix-review";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -476,7 +477,7 @@ export function TerminalViewport({
     terminal: {
       threadId,
       terminalId,
-      cwd,
+      ...(!isHelixReviewTerminal(terminalId) ? { cwd } : {}),
       ...(worktreePath !== undefined ? { worktreePath } : {}),
       ...(runtimeEnv ? { env: runtimeEnv } : {}),
       ...(providerInstanceId ? { providerInstanceId } : {}),

@@ -1,7 +1,17 @@
 import { describe, expect, it } from "vite-plus/test";
-import { helixStartupText, isHelixLaunchAwaitingClose } from "./helixStartup";
+import { helixLaunchError, helixStartupText, isHelixLaunchAwaitingClose } from "./helixStartup";
 
 describe("Helix launcher output", () => {
+  it("distinguishes launcher failures from shell startup output", () => {
+    const startup =
+      "exec sh -c 'hx-t3 --thread thread-1'\r\nwarning: shell configuration warning\r\n";
+    expect(helixLaunchError(startup)).toBeNull();
+    expect(
+      helixLaunchError(
+        `${startup}\u001b[31mhx-t3: HX: error 'review-open': file is outside this worktree\u001b[0m\r\nPress Enter to close this terminal.\r\n`,
+      ),
+    ).toBe("HX: error 'review-open': file is outside this worktree");
+  });
   it("exposes setup errors without leaking OSC protocol or terminal display sequences", () => {
     expect(
       helixStartupText(

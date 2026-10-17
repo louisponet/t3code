@@ -18,3 +18,8 @@ export function isHelixLaunchAwaitingClose(output: string): boolean {
     .split("\n")
     .some((line) => line.trim() === "Press Enter to close this terminal.");
 }
+
+export function helixLaunchError(output: string): string | null {
+  const errors = [...helixStartupText(output).matchAll(/hx-t3: ([^\n]+)/gu)];
+  return errors.at(-1)?.[1]?.trim() ?? null;
+}

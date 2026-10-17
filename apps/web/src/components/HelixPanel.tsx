@@ -1,7 +1,11 @@
 import { useHelixLocationDelivery } from "./chat/useHelixLocationDelivery";
 import { useHelixReviewController } from "./chat/useHelixReviewController";
 import { rememberHelixInitialLocation } from "./chat/helixInitialLocation";
-import { helixStartupText, isHelixLaunchAwaitingClose } from "./chat/helixStartup";
+import {
+  helixLaunchError,
+  helixStartupText,
+  isHelixLaunchAwaitingClose,
+} from "./chat/helixStartup";
 import { useThreadShell } from "~/state/entities";
 import { HelixPrControls } from "./HelixPrControls";
 import { randomUUID } from "~/lib/utils";
@@ -75,9 +79,11 @@ export default function HelixPanel({
   const [editorOwner, setEditorOwner] = useState<{
     key: string;
     editor: { terminalId: string };
+    pending: Promise<{ terminalId: string }>;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
+  const missingTerminals = useRef(new Set<string>());
   const sourceJson = JSON.stringify(options);
   const [modeSelection, setModeSelection] = useState<{
     sourceJson: string;
@@ -119,8 +125,9 @@ export default function HelixPanel({
       const existing = findOpenHelixReviewTerminal(
         sessions.filter(
           (entry) =>
+            !missingTerminals.current.has(entry.target.terminalId) &&
             (entry.state.summary?.worktreePath ?? entry.state.summary?.cwd) ===
-            (worktreePath ?? cwd),
+              (worktreePath ?? cwd),
         ),
         undefined,
         mode,
@@ -159,13 +166,14 @@ export default function HelixPanel({
     }
     void pending.then(
       (value) => {
+        if (cancelled) return;
         const known = sessions.find((entry) => entry.target.terminalId === value.terminalId);
-        if (known && known.state.status !== "running") {
+        if (known && known.state.status !== "running" && known.state.status !== "starting") {
           if (editors.get(key) === pending) editors.delete(key);
-          if (!cancelled) setRetry((value) => value + 1);
+          setRetry((value) => value + 1);
           return;
         }
-        if (!cancelled) setEditorOwner({ key, editor: value });
+        setEditorOwner({ key, editor: value, pending });
       },
       (failure) => {
         if (!cancelled) setError(failure instanceof Error ? failure.message : String(failure));
@@ -208,8 +216,15 @@ export default function HelixPanel({
       keybindings={keybindings}
       requestedMode={mode}
       onModeChange={(mode) => setModeSelection({ sourceJson, mode })}
+      onMissing={() => {
+        missingTerminals.current.add(editor.terminalId);
+        if (editors.get(key) === editorOwner?.pending) editors.delete(key);
+        setEditorOwner(null);
+        setError(null);
+        setRetry((value) => value + 1);
+      }}
       onExit={() => {
-        editors.delete(key);
+        if (editors.get(key) === editorOwner?.pending) editors.delete(key);
         setEditorOwner(null);
         setError("Helix exited. Reopen it to continue editing.");
       }}
@@ -228,6 +243,7 @@ function HelixSession({
   requestedMode,
   onModeChange,
   onExit,
+  onMissing,
 }: {
   threadRef: ScopedThreadRef;
   cwd: string;
@@ -239,16 +255,19 @@ function HelixSession({
   requestedMode: HelixMode;
   onModeChange: (mode: HelixMode) => void;
   onExit: () => void;
+  onMissing: () => void;
 }) {
   const session = useAttachedTerminalSession({
     environmentId: threadRef.environmentId,
     terminal: {
       threadId: threadRef.threadId,
       terminalId: editor.terminalId,
-      cwd,
-      ...(worktreePath ? { worktreePath } : {}),
     },
   });
+  const handleMissing = useEffectEvent(onMissing);
+  useEffect(() => {
+    if (session.missing) handleMissing();
+  }, [session.missing]);
   const write = useAtomCommand(terminalEnvironment.write, { reportFailure: false });
   const thread = useThreadShell(threadRef);
   const controllerRef = useHelixReviewController(randomUUID);
@@ -263,12 +282,16 @@ function HelixSession({
     lifecycle,
     nonce: null,
   });
-  const nonce = resolveHelixReviewReadyNonce(
-    markers,
-    readiness.lifecycle === lifecycle ? readiness.nonce : null,
-  );
+  const nonce =
+    session.status === "running" && !session.error
+      ? resolveHelixReviewReadyNonce(
+          markers,
+          readiness.lifecycle === lifecycle ? readiness.nonce : null,
+        )
+      : null;
   if (readiness.lifecycle !== lifecycle || readiness.nonce !== nonce)
     setReadiness({ lifecycle, nonce });
+  const startupError = nonce ? null : (session.error ?? helixLaunchError(output));
   const [cachedState, setCachedState] = useState<{
     lifecycle: string;
     state: HelixReviewState | null;
@@ -440,11 +463,11 @@ function HelixSession({
           role="status"
           className="max-h-48 shrink-0 overflow-auto border-b border-border/60 p-2 text-xs"
         >
-          <p>
-            {session.error ??
-              "Waiting for Helix. If setup is required, run hx-t3 setup on this environment and reopen the editor."}
-          </p>
-          <pre className="whitespace-pre-wrap break-words">{helixStartupText(output)}</pre>
+          <p>{startupError ?? "Opening Helix…"}</p>
+          <details>
+            <summary>Show startup output</summary>
+            <pre className="whitespace-pre-wrap break-words">{helixStartupText(output)}</pre>
+          </details>
           <Button
             size="xs"
             onClick={() => {
@@ -506,12 +529,13 @@ function HelixSession({
           worktreePath={worktreePath ?? null}
           onSessionExited={onExit}
           focusRequestId={requestId}
-          autoFocus
+          autoFocus={nonce !== null}
           visible
           resizeEpoch={0}
           drawerHeight={0}
           keybindings={keybindings}
         />
+        {!nonce ? <div aria-hidden="true" className="absolute inset-0 bg-background" /> : null}
       </div>
       {state ? (
         <form

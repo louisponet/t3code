@@ -8,6 +8,7 @@ import {
 } from "@t3tools/client-runtime/state/terminal";
 import {
   ThreadId,
+  TerminalSessionLookupError,
   AuthTerminalReadScope,
   AuthTerminalOperateScope,
   type EnvironmentId,
@@ -15,12 +16,14 @@ import {
   type TerminalSummary,
 } from "@t3tools/contracts";
 import { useMemo } from "react";
+import * as Schema from "effect/Schema";
 
 import { useEnvironmentQuery } from "./query";
 import { terminalEnvironment } from "./terminal";
 import { useEnvironmentScope } from "./session";
 
 const EMPTY_KNOWN_TERMINAL_SESSIONS = Object.freeze<ReadonlyArray<KnownTerminalSession>>([]);
+const isMissingTerminal = Schema.is(TerminalSessionLookupError);
 
 interface TerminalMetadataIndex {
   readonly all: ReadonlyArray<TerminalSummary>;
@@ -126,7 +129,7 @@ export function selectKnownTerminalSessions(
 export function useAttachedTerminalSession(input: {
   readonly environmentId: EnvironmentId | null;
   readonly terminal: TerminalAttachInput | null;
-}): TerminalSessionState {
+}): TerminalSessionState & { readonly missing: boolean } {
   const canRead = useEnvironmentScope(input.environmentId, AuthTerminalReadScope);
   const canOperate = useEnvironmentScope(input.environmentId, AuthTerminalOperateScope);
   const attach = useEnvironmentQuery(
@@ -155,7 +158,7 @@ export function useAttachedTerminalSession(input: {
 
   return useMemo(() => {
     if (input.environmentId === null || input.terminal === null) {
-      return EMPTY_TERMINAL_SESSION_STATE;
+      return { ...EMPTY_TERMINAL_SESSION_STATE, missing: false };
     }
     const summary =
       (metadata.data === null
@@ -164,8 +167,20 @@ export function useAttachedTerminalSession(input: {
             .byThreadId.get(input.terminal.threadId)
             ?.find((terminal) => terminal.terminalId === input.terminal?.terminalId)) ?? null;
     const state = combineTerminalSessionState(summary, attach.data ?? EMPTY_TERMINAL_BUFFER_STATE);
-    return attach.error === null ? state : { ...state, error: attach.error, status: "error" };
-  }, [attach.data, attach.error, input.environmentId, input.terminal, metadata.data]);
+    return {
+      ...(attach.error === null
+        ? state
+        : { ...state, error: attach.error, status: "error" as const }),
+      missing: isMissingTerminal(attach.failure),
+    };
+  }, [
+    attach.data,
+    attach.error,
+    attach.failure,
+    input.environmentId,
+    input.terminal,
+    metadata.data,
+  ]);
 }
 
 export function useKnownTerminalSessions(input: {

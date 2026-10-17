@@ -3450,6 +3450,47 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     ),
   );
 
+  it.effect.each([429, 503])("recovers proxy pool cooldowns with status %s", (status) =>
+    Effect.gen(function* () {
+      const harness = yield* makeWakeHarness;
+      const now = yield* DateTime.now;
+      const resetAt = DateTime.formatIso(DateTime.makeUnsafe(DateTime.toEpochMillis(now) + 60_000));
+      yield* harness.runtime.startTurn(
+        makeClaudeTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now,
+          attemptId: RunAttemptId.make("attempt-proxy-limit"),
+          text: "Continue.",
+          attachments: [],
+        }),
+      );
+      yield* Queue.offerAll(harness.sdkMessages, [
+        makeAssistantErrorFrame({
+          uuid: "00000000-0000-4000-8000-000000000752",
+          error: "rate_limit",
+        }),
+        makeResultFrame({
+          uuid: "00000000-0000-4000-8000-000000000753",
+          result: `API Error: ${status} ${JSON.stringify({ error: { code: "model_cooldown", reset_at: resetAt } })}`,
+          terminalReason: "api_error",
+          isError: true,
+          apiErrorStatus: status,
+        }),
+      ]);
+      const terminal = yield* Queue.take(harness.terminalReceipts);
+      assert.equal(terminal.status, "failed");
+      if (terminal.status !== "failed") return;
+      assert.equal(terminal.failure.class, "usage_limit");
+      assert.equal(terminal.failure.resetAt, resetAt);
+      assert.equal(terminal.failure.retryable, true);
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+      ),
+    ),
+  );
+
   it.effect.each([
     { status: 503, cooldown: "4m 6s", seconds: 246 },
     { status: 503, cooldown: "1h 2m 3s", seconds: 3723 },

@@ -207,3 +207,27 @@ it.effect("keys terminal failure items by provider turn across retries and fallb
     assert.equal(firstAttempt.ordinal, 101);
   }).pipe(Effect.provide(IdAllocator.layer)),
 );
+
+it("uses the proxy pool reset time for usage-limit recovery", () => {
+  const resetAt = "2026-10-18T01:30:00.000Z";
+  const failure = makeProviderFailure({
+    class: "transport_error",
+    message: `API Error: 429 ${JSON.stringify({ error: { code: "model_cooldown", message: "All credentials are cooling down", reset_at: resetAt } })}`,
+    resetAt: "2026-10-19T00:00:00.000Z",
+  });
+  assert.equal(failure.class, "usage_limit");
+  assert.equal(failure.code, "model_cooldown");
+  assert.equal(failure.retryable, true);
+  assert.equal(failure.resetAt, resetAt);
+});
+
+it.each([
+  '{"error":{"code":"model_cooldown","reset_at":"invalid"}}',
+  '{"error":{"code":"model_cooldown","reset_at":123}}',
+  '{"error":{"code":"model_cooldown"',
+  '{"error":{"code":"authentication_error","reset_at":"2026-10-18T00:00:00Z"}}',
+])("does not schedule recovery from invalid proxy timing: %s", (message) => {
+  const failure = makeProviderFailure({ message, class: "provider_error" });
+  assert.equal(failure.class, "provider_error");
+  assert.isUndefined(failure.resetAt);
+});

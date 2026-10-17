@@ -6611,11 +6611,27 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       expectedClass: "usage_limit",
     },
     { name: "retry", code: "usageLimitExceeded", notification: true, expectedClass: "usage_limit" },
+    {
+      name: "proxy-reset",
+      code: "httpConnectionFailed",
+      notification: true,
+      expectedClass: "usage_limit",
+    },
+    {
+      name: "proxy-retry",
+      code: "httpConnectionFailed",
+      notification: true,
+      expectedClass: "usage_limit",
+    },
   ] as const)("classifies Codex terminal failures from $name evidence", (scenario) =>
     Effect.scoped(
       Effect.gen(function* () {
         const nativeThreadId = `native-limit-${scenario.name}`;
         const nativeTurnId = `turn-limit-${scenario.name}`;
+        const proxyReset = scenario.name === "proxy-reset" || scenario.name === "proxy-retry";
+        const nativeCode = proxyReset
+          ? { httpConnectionFailed: { httpStatusCode: 429 } }
+          : scenario.code;
         const message = "Provider stopped this request.";
         const resetAt = "2033-05-19T07:20:00.000Z";
         const snapshot = {
@@ -6635,7 +6651,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
           scenario: `codex-limit-${scenario.name}`,
           entries: [
             ...codexReplayPreamble({ nativeThreadId, nativeTurnId, prompt: "Continue." }),
-            ...(scenario.name === "known-reset" || scenario.name === "deferred-reset"
+            ...(scenario.name === "known-reset" || scenario.name === "deferred-reset" || proxyReset
               ? [snapshot]
               : []),
             ...(scenario.name === "deferred-reset"
@@ -6684,12 +6700,18 @@ describe("CodexAdapterV2 post-settle continuation", () => {
                       params: {
                         threadId: nativeThreadId,
                         turnId: nativeTurnId,
-                        willRetry: scenario.name === "retry",
+                        willRetry: scenario.name === "retry" || scenario.name === "proxy-retry",
                         error: {
                           message,
-                          codexErrorInfo: scenario.code,
-                          additionalDetails:
-                            scenario.name === "matching-details"
+                          codexErrorInfo: nativeCode,
+                          additionalDetails: proxyReset
+                            ? JSON.stringify({
+                                error: {
+                                  code: "model_cooldown",
+                                  reset_at: "2033-05-19T06:20:00.000Z",
+                                },
+                              })
+                            : scenario.name === "matching-details"
                               ? "Detailed provider allowance explanation."
                               : null,
                         },
@@ -6709,9 +6731,11 @@ describe("CodexAdapterV2 post-settle continuation", () => {
                     ...makeCodexReplayTurn({ id: nativeTurnId, status: "failed" }),
                     error: {
                       message: scenario.name === "replacement" ? "A different failure." : message,
-                      ...(scenario.notification && scenario.name !== "matching-details"
+                      ...(scenario.notification &&
+                      scenario.name !== "matching-details" &&
+                      !proxyReset
                         ? {}
-                        : { codexErrorInfo: scenario.code }),
+                        : { codexErrorInfo: nativeCode }),
                     },
                   },
                 },
@@ -6781,6 +6805,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
           assert.equal(terminal.failure.resetAt, resetAt);
         if (scenario.name === "matching-details")
           assert.equal(terminal.failure.message, "Detailed provider allowance explanation.");
+        if (proxyReset) assert.equal(terminal.failure.resetAt, "2033-05-19T06:20:00.000Z");
         if (scenario.name === "late-reset") {
           yield* Deferred.await(resetReceipt);
           const item = harness.events.find(

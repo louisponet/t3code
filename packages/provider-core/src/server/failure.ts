@@ -10,11 +10,11 @@ import type {
   RunId,
   ThreadId,
 } from "@t3tools/contracts";
-import * as DateTime from "effect/DateTime";
 import * as Cause from "effect/Cause";
+import * as DateTime from "effect/DateTime";
+import * as Schema from "effect/Schema";
 
 import * as IdAllocator from "./IdAllocator.ts";
-import * as Schema from "effect/Schema";
 
 export class ContextHandoffBudgetError extends Schema.TaggedError<ContextHandoffBudgetError>()(
   "ContextHandoffBudgetError",
@@ -29,6 +29,10 @@ export const MAX_PROVIDER_FAILURE_MESSAGE_LENGTH = 4_096;
 export const MAX_PROVIDER_FAILURE_CODE_LENGTH = 128;
 
 const DEFAULT_PROVIDER_FAILURE_MESSAGE = "Provider turn failed.";
+const ProxyCooldown = Schema.Struct({
+  error: Schema.Struct({ code: Schema.Literal("model_cooldown"), reset_at: Schema.String }),
+});
+const isProxyCooldown = Schema.is(ProxyCooldown);
 
 function causeMessage(cause: unknown): string | undefined {
   const seen = new Set<unknown>();
@@ -151,19 +155,32 @@ export function makeProviderFailure(input: {
 }): OrchestrationV2ProviderFailure {
   const rawMessage = input.message ?? causeMessage(input.cause) ?? DEFAULT_PROVIDER_FAILURE_MESSAGE;
   const message = boundedText(rawMessage, MAX_PROVIDER_FAILURE_MESSAGE_LENGTH);
+  let proxyResetAt: string | null = null;
+  if (message.includes('"model_cooldown"')) {
+    try {
+      const payload: unknown = JSON.parse(
+        message.slice(message.indexOf("{"), message.lastIndexOf("}") + 1),
+      );
+      if (isProxyCooldown(payload) && Number.isFinite(Date.parse(payload.error.reset_at))) {
+        proxyResetAt = payload.error.reset_at;
+      }
+    } catch {
+      // Native clients can truncate the upstream error body.
+    }
+  }
   const rawCode = input.code ?? stringField(input.cause, "code") ?? null;
   const code =
     rawCode === null ? null : boundedText(rawCode, MAX_PROVIDER_FAILURE_CODE_LENGTH) || null;
 
+  const failureClass = proxyResetAt === null ? (input.class ?? "unknown") : "usage_limit";
+  const resetAt = proxyResetAt ?? input.resetAt;
   return {
-    class: input.class ?? "unknown",
+    class: failureClass,
     message: message || DEFAULT_PROVIDER_FAILURE_MESSAGE,
-    code,
-    retryable: input.retryable ?? null,
-    ...(input.class === "usage_limit" &&
-    input.resetAt != null &&
-    Number.isFinite(Date.parse(input.resetAt))
-      ? { resetAt: DateTime.formatIso(DateTime.makeUnsafe(input.resetAt)) }
+    code: proxyResetAt === null ? code : "model_cooldown",
+    retryable: proxyResetAt === null ? (input.retryable ?? null) : true,
+    ...(failureClass === "usage_limit" && resetAt != null && Number.isFinite(Date.parse(resetAt))
+      ? { resetAt: DateTime.formatIso(DateTime.makeUnsafe(resetAt)) }
       : {}),
   };
 }

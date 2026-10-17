@@ -63,17 +63,17 @@ function fixture(
           ? decodeRequest(new TextDecoder().decode(request.body.body))
           : undefined;
       requests.push({ path, ...(body ? { body } : {}) });
-      if (path.endsWith("/auth-files"))
+      if (path.endsWith("/credentials"))
         return HttpClientResponse.fromWeb(
           request,
           Response.json({ files: options.accounts ?? accounts }),
         );
-      if (path.endsWith("/reset-quota"))
+      if (path.endsWith("/routing/cooldown/reset"))
         return HttpClientResponse.fromWeb(
           request,
           Response.json({}, { status: options.cooldownStatus ?? 200 }),
         );
-      expect(path).toBe("/v0/management/api-call");
+      expect(path).toBe("/v8/management/requests/api-call");
       expect(body?.header?.Authorization).toBe("Bearer $TOKEN$");
       const upstream = options.upstream?.(body!) ?? {
         status: 200,
@@ -232,7 +232,7 @@ describe("CLIProxyAPI built-in management API", () => {
       );
       expect(
         test.requests
-          .filter((request) => request.path.endsWith("/reset-quota"))
+          .filter((request) => request.path.endsWith("/routing/cooldown/reset"))
           .map((request) => request.body?.auth_index),
       ).toEqual(["b", "b"]);
     }),
@@ -247,9 +247,9 @@ describe("CLIProxyAPI built-in management API", () => {
       const test = fixture({ upstream: () => ({ status: 200, body: { code } }) });
       const api = yield* test.api;
       expect(yield* api.consume(config, "first.json", "credit")).toEqual({ outcome });
-      expect(test.requests.some((request) => request.path.endsWith("/reset-quota"))).toBe(
-        code === "already_redeemed",
-      );
+      expect(
+        test.requests.some((request) => request.path.endsWith("/routing/cooldown/reset")),
+      ).toBe(code === "already_redeemed");
     }),
   );
 
@@ -270,7 +270,7 @@ describe("CLIProxyAPI built-in management API", () => {
       expect((yield* api.consume(config, "first.json", "credit").pipe(Effect.result))._tag).toBe(
         "Failure",
       );
-      expect(test.requests.every((request) => request.path.endsWith("/auth-files"))).toBe(true);
+      expect(test.requests.every((request) => request.path.endsWith("/credentials"))).toBe(true);
     }),
   );
 
@@ -294,9 +294,9 @@ describe("CLIProxyAPI built-in management API", () => {
         .filter((request) => request.body?.url?.endsWith("/consume"))
         .map((request) => request.body?.data);
       expect(data[0]).toBe(data[1]);
-      expect(test.requests.filter((request) => request.path.endsWith("/reset-quota"))).toHaveLength(
-        1,
-      );
+      expect(
+        test.requests.filter((request) => request.path.endsWith("/routing/cooldown/reset")),
+      ).toHaveLength(1);
     }),
   );
 

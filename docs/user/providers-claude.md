@@ -65,6 +65,11 @@ Claude Code holds the turn until that window reopens, so it can keep showing as
 working. Wait for the reset, or stop the turn and continue later. The warning's
 timestamp shows when the displayed wait started.
 
+For turns that end at a usage limit, enable **Auto-resume limited threads**
+in Settings to continue when usage resets. When you use CLIProxyAPI with multiple
+subscriptions, T3 uses the earliest reset reported by the proxy. Keep the T3 server
+running so it can resume the thread at that time.
+
 ## Skills
 
 Claude skills come from the config directory's `skills` folder and the project's

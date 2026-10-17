@@ -2746,6 +2746,15 @@ function providerFailureFromResult(
   failureHint?: string,
   usageLimited = false,
 ): OrchestrationV2ProviderFailure | null {
+  if (
+    message.subtype === "success" &&
+    message.is_error &&
+    message.terminal_reason === "api_error" &&
+    (message.api_error_status === 429 || message.api_error_status === 503)
+  ) {
+    const proxyFailure = makeProviderFailure({ message: message.result });
+    if (proxyFailure.code === "model_cooldown") return proxyFailure;
+  }
   const gatewayLimit =
     failureHint === undefined &&
     message.subtype === "success" &&
@@ -7473,7 +7482,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               : providerFailureFromResult(message, completedAt, failureHint, usageLimited);
             const terminalFailure =
               resultFailure?.class === "usage_limit"
-                ? { ...resultFailure, resetAt: resetAt ?? resultFailure.resetAt ?? null }
+                ? { ...resultFailure, resetAt: resultFailure.resetAt ?? resetAt ?? null }
                 : resultFailure;
             yield* finalizeActiveTurn({
               context,

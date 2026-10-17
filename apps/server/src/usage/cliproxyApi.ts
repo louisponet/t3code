@@ -130,7 +130,7 @@ export const makeCliproxyApi = Effect.gen(function* () {
     body?: unknown,
   ) {
     const url = yield* Effect.try({
-      try: () => new URL(`/v0/management/${path}`, config.url).toString(),
+      try: () => new URL(`/v8/management/${path}`, config.url).toString(),
       catch: () => new UsageLimitSourceError({ detail: "The hub URL is not valid." }),
     });
     const request = (
@@ -150,7 +150,7 @@ export const makeCliproxyApi = Effect.gen(function* () {
   });
 
   const authFiles = Effect.fn("CliproxyApi.authFiles")(function* (config: UsageLimitSourceConfig) {
-    const response = yield* management(config, "auth-files");
+    const response = yield* management(config, "credentials");
     return (yield* decodeAuthFiles(response)).files;
   });
 
@@ -172,7 +172,7 @@ export const makeCliproxyApi = Effect.gen(function* () {
               : {}),
           }
         : { Authorization: "Bearer $TOKEN$", "anthropic-beta": "oauth-2025-04-20" };
-    const raw = yield* management(config, "api-call", {
+    const raw = yield* management(config, "requests/api-call", {
       auth_index: account.auth_index,
       method: data === undefined ? "GET" : "POST",
       url,
@@ -350,7 +350,7 @@ export const makeCliproxyApi = Effect.gen(function* () {
         } as const
       )[response.code];
       if (outcome !== "reset" && outcome !== "alreadyRedeemed") return { outcome };
-      const cleared = yield* management(config, "reset-quota", {
+      const cleared = yield* management(config, "routing/cooldown/reset", {
         auth_index: account.auth_index,
       }).pipe(Effect.result);
       return {

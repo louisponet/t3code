@@ -1,10 +1,13 @@
 import {
   McpCapabilityUnavailableError,
+  OrchestrationV2ReviewFindingSeverity,
   OrchestratorMcpFailure,
   PositiveInt,
   PullRequestReviewGuide,
   PullRequestReviewGuideRun,
   PullRequestState,
+  REVIEW_FINDING_BODY_MAX_CHARS,
+  REVIEW_FINDING_TITLE_MAX_CHARS,
   ThreadPullRequestLinkSource,
   TrimmedNonEmptyString,
   ThreadId,
@@ -18,6 +21,7 @@ import * as Orchestrator from "../../../orchestration-v2/Orchestrator.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as ProjectService from "../../../project/ProjectService.ts";
 import * as PullRequestReviewGuideService from "../../../pullRequest/PullRequestReviewGuideService.ts";
+import * as ReviewFindingService from "../../../pullRequest/ReviewFindingService.ts";
 
 const dependencies = [
   McpInvocationContext.McpInvocationContext,
@@ -30,6 +34,8 @@ const guideDependencies = [
   ...dependencies,
   PullRequestReviewGuideService.PullRequestReviewGuideService,
 ];
+
+const findingDependencies = [...dependencies, ReviewFindingService.ReviewFindingService];
 
 const REGISTER_EVERY_PR =
   "Register every pull request you open for this thread, including each layer of a stack, right after creating it.";
@@ -183,6 +189,15 @@ export class PullRequestGuideFailedError extends Schema.TaggedError<PullRequestG
   }
 }
 
+export class ReviewFindingReportFailedError extends Schema.TaggedError<ReviewFindingReportFailedError>()(
+  "ReviewFindingReportFailedError",
+  { detail: Schema.optional(Schema.String), cause: Schema.optional(Schema.Defect()) },
+) {
+  override get message(): string {
+    return this.detail ?? "Could not report the review findings.";
+  }
+}
+
 export const PullRequestToolError = Schema.Union([
   OrchestratorMcpFailure,
   McpCapabilityUnavailableError,
@@ -199,6 +214,7 @@ export const PullRequestToolError = Schema.Union([
   PullRequestWatchFromSubagentError,
   PullRequestProjectNotFoundError,
   PullRequestGuideFailedError,
+  ReviewFindingReportFailedError,
 ]);
 export type PullRequestToolError = typeof PullRequestToolError.Type;
 
@@ -405,6 +421,67 @@ const ReadPullRequestGuideTool = Tool.make("read_pull_request_guide", {
   .annotate(Tool.Idempotent, true)
   .annotate(Tool.OpenWorld, true);
 
+const ReviewFindingInput = Schema.Struct({
+  id: Schema.optionalKey(
+    TrimmedNonEmptyString.annotate({
+      description:
+        "Id of a finding you reported earlier, to replace it with this content. Omit for a new finding.",
+    }),
+  ),
+  severity: Schema.optional(OrchestrationV2ReviewFindingSeverity),
+  title: TrimmedNonEmptyString.check(Schema.isMaxLength(REVIEW_FINDING_TITLE_MAX_CHARS)),
+  body: Schema.String.check(Schema.isMaxLength(REVIEW_FINDING_BODY_MAX_CHARS)).annotate({
+    description:
+      "Markdown: the problem, a concrete scenario where it fails, and the fix you suggest.",
+  }),
+  path: Schema.optional(
+    TrimmedNonEmptyString.check(Schema.isMaxLength(2_048)).annotate({
+      description: "Repository-relative path of the file the finding points at.",
+    }),
+  ),
+  line: Schema.optional(
+    PositiveInt.annotate({
+      description: "Line in the pull request's head version of path (the new side of the diff).",
+    }),
+  ),
+  endLine: Schema.optional(
+    PositiveInt.annotate({
+      description: "Last line when the finding spans several, at least line.",
+    }),
+  ),
+});
+
+export const ReportReviewFindingsResult = Schema.Struct({
+  pullRequest: Schema.String,
+  findings: Schema.Array(Schema.Struct({ id: Schema.String, title: Schema.String })),
+  message: Schema.String,
+});
+export type ReportReviewFindingsResult = typeof ReportReviewFindingsResult.Type;
+
+// Read-only in the MCP sense: it only adds cards to the caller's own thread and
+// touches no workspace or host, so plan mode and read-only sandboxes can use it.
+const ReportReviewFindingsTool = Tool.make("report_review_findings", {
+  description:
+    "Needs an agent running inside a T3 thread. Show code-review findings for the thread's linked pull request as cards the user can dismiss, post to the pull request, or reply to. Call it once after reviewing, with every finding, most severe first: one finding per entry, with path and line when it points at code. Each finding gets a short id. The user's replies arrive as messages that name the finding id; answer them, and to revise a finding call again with its id and its full new content. Posted findings cannot be revised. Omit pullRequest when the thread has one linked pull request (link it first with link_pull_request if needed); pass it when several are linked. The user already sees the cards, so your reply should not repeat them: give a short summary and your verdict.",
+  parameters: Schema.Struct({
+    pullRequest: Schema.optional(
+      GuideTarget.annotate({
+        description:
+          "Pull request the findings are about, linked to this thread. Omit when only one is linked.",
+      }),
+    ),
+    findings: Schema.Array(ReviewFindingInput).check(Schema.isMinLength(1), Schema.isMaxLength(50)),
+  }),
+  success: ReportReviewFindingsResult,
+  failure: PullRequestToolError,
+  dependencies: findingDependencies,
+})
+  .annotate(Tool.Title, "Report review findings")
+  .annotate(Tool.Readonly, true)
+  .annotate(Tool.Destructive, false)
+  .annotate(Tool.Idempotent, false)
+  .annotate(Tool.OpenWorld, false);
+
 export const PullRequestsToolkit = Toolkit.make(
   LinkPullRequestTool,
   UnlinkPullRequestTool,
@@ -413,4 +490,5 @@ export const PullRequestsToolkit = Toolkit.make(
   UnwatchPullRequestTool,
   WritePullRequestGuidesTool,
   ReadPullRequestGuideTool,
+  ReportReviewFindingsTool,
 );

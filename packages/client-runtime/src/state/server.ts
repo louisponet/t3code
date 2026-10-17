@@ -1319,6 +1319,34 @@ export function createServerEnvironmentAtoms<R, E>(
           JSON.stringify([environmentId, input.threadId, input.turnItemId]),
       },
     }),
+    // One action per finding card at a time, so a double press cannot post twice.
+    setReviewFindingStatus: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:review-findings:set-status",
+      tag: WS_METHODS.reviewFindingsSetStatus,
+      concurrency: {
+        mode: "singleFlight",
+        key: ({ environmentId, input }) =>
+          JSON.stringify([environmentId, input.threadId, input.turnItemId]),
+      },
+    }),
+    postReviewFinding: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:review-findings:post",
+      tag: WS_METHODS.reviewFindingsPost,
+      concurrency: {
+        mode: "singleFlight",
+        key: ({ environmentId, input }) =>
+          JSON.stringify([environmentId, input.threadId, input.turnItemId]),
+      },
+    }),
+    commentOnReviewFinding: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:review-findings:comment",
+      tag: WS_METHODS.reviewFindingsComment,
+      concurrency: {
+        mode: "singleFlight",
+        key: ({ environmentId, input }) =>
+          JSON.stringify([environmentId, input.threadId, input.turnItemId]),
+      },
+    }),
     refreshUsageRates: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:refresh-usage-rates",
       tag: WS_METHODS.serverRefreshUsageRates,

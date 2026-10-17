@@ -59,6 +59,10 @@
       "types": "./src/secretRequest.ts",
       "default": "./src/secretRequest.ts"
     },
+    "./review-finding": {
+      "types": "./src/reviewFinding.ts",
+      "default": "./src/reviewFinding.ts"
+    },
     "./scheduled-task-webhook": {
       "types": "./src/scheduledTaskWebhook.ts",
       "default": "./src/scheduledTaskWebhook.ts"

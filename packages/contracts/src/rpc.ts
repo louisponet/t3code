@@ -351,6 +351,13 @@ import {
 } from "./scheduledTask.ts";
 import { SecretRequestAnswerInput, SecretRequestError } from "./secretRequest.ts";
 import {
+  ReviewFindingCommentInput,
+  ReviewFindingError,
+  ReviewFindingPostInput,
+  ReviewFindingPostResult,
+  ReviewFindingSetStatusInput,
+} from "./reviewFinding.ts";
+import {
   ProjectCloneActionInput,
   ProjectCloneActionResult,
   ProjectCloneListEvent,
@@ -510,6 +517,9 @@ export const WS_METHODS = {
   scheduledTasksRunNow: "scheduledTasks.runNow",
   scheduledTasksRotateWebhookToken: "scheduledTasks.rotateWebhookToken",
   secretsAnswerRequest: "secrets.answerRequest",
+  reviewFindingsSetStatus: "reviewFindings.setStatus",
+  reviewFindingsPost: "reviewFindings.post",
+  reviewFindingsComment: "reviewFindings.comment",
   scheduledTasksListWebhookDeliveries: "scheduledTasks.listWebhookDeliveries",
   scheduledTasksGetWebhookDelivery: "scheduledTasks.getWebhookDelivery",
 
@@ -1805,6 +1815,22 @@ const WsSecretsAnswerRequestRpc = Rpc.make(WS_METHODS.secretsAnswerRequest, {
   error: Schema.Union([SecretRequestError, EnvironmentAuthorizationError]),
 });
 
+const WsReviewFindingsSetStatusRpc = Rpc.make(WS_METHODS.reviewFindingsSetStatus, {
+  payload: ReviewFindingSetStatusInput,
+  error: Schema.Union([ReviewFindingError, EnvironmentAuthorizationError]),
+});
+
+const WsReviewFindingsPostRpc = Rpc.make(WS_METHODS.reviewFindingsPost, {
+  payload: ReviewFindingPostInput,
+  success: ReviewFindingPostResult,
+  error: Schema.Union([ReviewFindingError, EnvironmentAuthorizationError]),
+});
+
+const WsReviewFindingsCommentRpc = Rpc.make(WS_METHODS.reviewFindingsComment, {
+  payload: ReviewFindingCommentInput,
+  error: Schema.Union([ReviewFindingError, EnvironmentAuthorizationError]),
+});
+
 const WsScheduledTasksListWebhookDeliveriesRpc = Rpc.make(
   WS_METHODS.scheduledTasksListWebhookDeliveries,
   {
@@ -1909,6 +1935,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsScheduledTasksRunNowRpc,
   WsScheduledTasksRotateWebhookTokenRpc,
   WsSecretsAnswerRequestRpc,
+  WsReviewFindingsSetStatusRpc,
+  WsReviewFindingsPostRpc,
+  WsReviewFindingsCommentRpc,
   WsScheduledTasksListWebhookDeliveriesRpc,
   WsScheduledTasksGetWebhookDeliveryRpc,
   WsServerReportClientActivityRpc,

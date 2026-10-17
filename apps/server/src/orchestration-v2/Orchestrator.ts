@@ -475,6 +475,8 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "thread.created.record":
       return command.parentThreadId;
     case "secret_request.record":
+    case "review_finding.record":
+    case "review_finding.status":
       return command.threadId;
     case "thread.fork":
     case "thread.merge_back":
@@ -503,6 +505,14 @@ function withoutPreparationResult(
   item: Extract<OrchestrationV2TurnItem, { readonly type: "command_execution" }>,
 ) {
   const { output: _output, exitCode: _exitCode, outputIndicatesFailure: _failure, ...rest } = item;
+  return rest;
+}
+
+// A revision replaces the whole finding, so optional fields it omits must not survive.
+function withoutOptionalReviewFindingContent(
+  item: Extract<OrchestrationV2TurnItem, { readonly type: "review_finding" }>,
+) {
+  const { severity: _severity, path: _path, line: _line, endLine: _endLine, ...rest } = item;
   return rest;
 }
 
@@ -7252,6 +7262,175 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     },
   );
 
+  const dispatchReviewFindingRecord = Effect.fn("orchestrationV2.dispatch.reviewFindingRecord")(
+    function* (
+      command: Extract<OrchestrationV2InternalCommand, { readonly type: "review_finding.record" }>,
+      events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+    ) {
+      const projection = yield* projectionStore
+        .getThreadRecords(command.threadId, ["runs", "turnItems", "attempts", "providerTurns"], {
+          turnItemTypes: ["review_finding"],
+          messageRoles: [],
+        })
+        .pipe(
+          Effect.mapError(
+            (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+          ),
+        );
+      const existing = projection.turnItems.find((item) => item.id === command.turnItemId);
+      if (existing !== undefined && existing.type !== "review_finding") {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Turn item ${command.turnItemId} is not a review finding.`,
+        });
+      }
+      if (existing?.findingStatus === "posted") {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Finding ${existing.findingId} is already posted and cannot be revised.`,
+        });
+      }
+      // A revision may come from a later run; the card stays in the run that first reported it.
+      const runId = existing === undefined ? command.runId : existing.runId;
+      const run = projection.runs.find((candidate) => candidate.id === runId);
+      if (run === undefined) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Run ${runId} of finding ${command.findingId} was not found.`,
+        });
+      }
+      if (existing === undefined && run.rootNodeId !== command.nodeId) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Node ${command.nodeId} is not the root of run ${command.runId}.`,
+        });
+      }
+      const now = yield* DateTime.now;
+      const content = {
+        ...(command.severity === undefined ? {} : { severity: command.severity }),
+        title: command.title,
+        body: command.body,
+        ...(command.path === undefined ? {} : { path: command.path }),
+        ...(command.line === undefined ? {} : { line: command.line }),
+        ...(command.endLine === undefined ? {} : { endLine: command.endLine }),
+        pullRequest: command.pullRequest,
+        headSha: command.headSha,
+      };
+      const turnItem: OrchestrationV2TurnItem =
+        existing === undefined
+          ? {
+              id: command.turnItemId,
+              threadId: command.threadId,
+              runId: run.id,
+              nodeId: command.nodeId,
+              providerThreadId: run.providerThreadId,
+              providerTurnId: providerTurnForRun(projection, run)?.id ?? null,
+              nativeItemRef: null,
+              parentItemId: null,
+              ordinal: yield* nextTurnItemOrdinal(projection),
+              status: "completed",
+              startedAt: now,
+              completedAt: now,
+              updatedAt: now,
+              type: "review_finding",
+              findingId: command.findingId,
+              ...content,
+              findingStatus: "open",
+            }
+          : { ...withoutOptionalReviewFindingContent(existing), ...content, updatedAt: now };
+      yield* emit(
+        events,
+        command,
+      )({
+        type: "turn-item.updated",
+        threadId: command.threadId,
+        runId: run.id,
+        ...(turnItem.nodeId === null ? {} : { nodeId: turnItem.nodeId }),
+        providerInstanceId: run.providerInstanceId,
+        occurredAt: now,
+        payload: turnItem,
+      });
+    },
+  );
+
+  const dispatchReviewFindingStatus = Effect.fn("orchestrationV2.dispatch.reviewFindingStatus")(
+    function* (
+      command: Extract<OrchestrationV2InternalCommand, { readonly type: "review_finding.status" }>,
+      events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+    ) {
+      const projection = yield* projectionStore
+        .getThreadRecords(command.threadId, ["runs", "turnItems"], {
+          turnItemTypes: ["review_finding"],
+          messageRoles: [],
+        })
+        .pipe(
+          Effect.mapError(
+            (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+          ),
+        );
+      const existing = projection.turnItems.find((item) => item.id === command.turnItemId);
+      if (existing?.type !== "review_finding") {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Review finding ${command.turnItemId} was not found.`,
+        });
+      }
+      const refusal =
+        existing.findingStatus === "posted"
+          ? `Finding ${existing.findingId} is already posted.`
+          : command.findingStatus !== "posted"
+            ? undefined
+            : existing.findingStatus !== "open"
+              ? `Finding ${existing.findingId} is ${existing.findingStatus} and cannot be posted.`
+              : command.postedAs === undefined
+                ? `Posting finding ${existing.findingId} needs postedAs.`
+                : undefined;
+      if (refusal !== undefined) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: refusal,
+        });
+      }
+      if (existing.findingStatus === command.findingStatus) {
+        return;
+      }
+      const run = projection.runs.find((candidate) => candidate.id === existing.runId);
+      if (run === undefined) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Run ${existing.runId} of finding ${existing.findingId} was not found.`,
+        });
+      }
+      const now = yield* DateTime.now;
+      yield* emit(
+        events,
+        command,
+      )({
+        type: "turn-item.updated",
+        threadId: command.threadId,
+        runId: run.id,
+        ...(existing.nodeId === null ? {} : { nodeId: existing.nodeId }),
+        providerInstanceId: run.providerInstanceId,
+        occurredAt: now,
+        payload: {
+          ...existing,
+          findingStatus: command.findingStatus,
+          ...(command.findingStatus === "posted" && command.postedAs !== undefined
+            ? { postedAs: command.postedAs }
+            : {}),
+          updatedAt: now,
+        },
+      });
+    },
+  );
+
   const dispatchRuntimeRequestRespond = (
     command: Extract<OrchestrationV2Command, { readonly type: "runtime-request.respond" }>,
     events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
@@ -10903,6 +11082,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "secret_request.record":
         yield* dispatchSecretRequestRecord(command, events);
         break;
+      case "review_finding.record":
+        yield* dispatchReviewFindingRecord(command, events);
+        break;
+      case "review_finding.status":
+        yield* dispatchReviewFindingStatus(command, events);
+        break;
       default:
         return yield* dispatchUnsupported(command);
     }
@@ -10990,7 +11175,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         planned.events.length > 0 ||
         command.type === "thread.background-work.settle" ||
         command.type === "thread.stop" ||
-        command.type === "subagent.stop"
+        command.type === "subagent.stop" ||
+        command.type === "review_finding.status"
           ? Effect.succeed(planned)
           : Effect.fail(
               new OrchestratorDispatchError({

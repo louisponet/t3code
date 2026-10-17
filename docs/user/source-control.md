@@ -295,6 +295,22 @@ To shape guides to your taste, write **Review guide instructions** in Settings â
 such as what to show first or what to skip; projects can override them. They change emphasis and
 ordering, not the guide's layout or which files it covers.
 
+### Review findings
+
+An agent reviewing a linked pull request can report its findings as cards in the thread. Ask it
+to report them with `report_review_findings`, or put that in the prompt of a scheduled review.
+On each card:
+
+- **Post** sends the finding to the pull request as your account on that server. It lands as an
+  inline comment when its line is part of the change and the pull request has not moved since the
+  review; otherwise it becomes a regular comment that names the file and line.
+- **Comment** sends your note to the thread's agent with the finding quoted. The agent answers in
+  the thread and can revise the card before you post it.
+- **Dismiss** collapses the card; **Restore** brings it back.
+
+Posted findings can't be revised. Cards in a forked thread are read-only; act on them in the
+thread where they were reported.
+
 ### Mark files as viewed
 
 Tick a file off in the **Code** tab once you have read it and it collapses; the toolbar keeps a

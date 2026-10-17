@@ -9,6 +9,7 @@ import {
   type OrchestrationV2ThreadShell,
   type SourceControlProviderKind,
   type ThreadId,
+  type ThreadPullRequestKey,
   type ThreadPullRequestLink,
 } from "@t3tools/contracts";
 import { changeRequestUrlFor, parseChangeRequestUrl } from "@t3tools/shared/changeRequestUrl";
@@ -27,6 +28,7 @@ import * as Option from "effect/Option";
 import * as Orchestrator from "../../../orchestration-v2/Orchestrator.ts";
 import * as ProjectService from "../../../project/ProjectService.ts";
 import * as PullRequestReviewGuideService from "../../../pullRequest/PullRequestReviewGuideService.ts";
+import * as ReviewFindingService from "../../../pullRequest/ReviewFindingService.ts";
 import { pullRequestSyncKey } from "../../../pullRequest/pullRequestSyncKey.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
@@ -47,6 +49,7 @@ import {
   PullRequestGuideFailedError,
   PullRequestProjectNotFoundError,
   PullRequestsToolkit,
+  ReviewFindingReportFailedError,
   type ThreadPullRequestEntry,
 } from "./tools.ts";
 
@@ -186,6 +189,7 @@ function projectForPullRequest(
 const make = Effect.gen(function* () {
   const engine = yield* Orchestrator.OrchestratorV2;
   const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
+  const reviewFindings = yield* ReviewFindingService.ReviewFindingService;
 
   const projects = yield* ProjectService.ProjectService;
   const crypto = yield* Crypto.Crypto;
@@ -201,7 +205,8 @@ const make = Effect.gen(function* () {
       | typeof PullRequestLinkFailedError
       | typeof PullRequestUnlinkFailedError
       | typeof PullRequestListFailedError
-      | typeof PullRequestWatchFailedError,
+      | typeof PullRequestWatchFailedError
+      | typeof ReviewFindingReportFailedError,
     requested: ThreadId | undefined,
   ) {
     const scope = yield* McpInvocationContext.requireMcpCapability("pull-requests");
@@ -224,7 +229,8 @@ const make = Effect.gen(function* () {
     Failure:
       | typeof PullRequestLinkFailedError
       | typeof PullRequestUnlinkFailedError
-      | typeof PullRequestWatchFailedError,
+      | typeof PullRequestWatchFailedError
+      | typeof ReviewFindingReportFailedError,
   ) =>
     projects.getShell(thread.projectId).pipe(
       Effect.map(Option.getOrUndefined),
@@ -491,6 +497,41 @@ const make = Effect.gen(function* () {
             result.guide !== null &&
             result.currentHeadSha !== null &&
             result.guide.headSha !== result.currentHeadSha,
+        };
+      }),
+    ),
+    report_review_findings: McpToolAccess.actsAsCaller((input) =>
+      Effect.gen(function* () {
+        const scope = yield* McpInvocationContext.requireMcpCapability("pull-requests");
+        const { thread } = yield* McpInvocationContext.requireThreadScope(
+          scope,
+          "report_review_findings",
+        );
+        let pullRequest: ThreadPullRequestKey | undefined;
+        if (input.pullRequest !== undefined) {
+          const shell = yield* requireThread(ReviewFindingReportFailedError, thread.threadId);
+          const project = yield* projectOf(shell, ReviewFindingReportFailedError);
+          const target = yield* resolveTarget(input.pullRequest, project);
+          pullRequest = { host: target.host, repository: target.repository, number: target.number };
+        }
+        const result = yield* reviewFindings
+          .report({
+            threadId: thread.threadId,
+            providerInstanceId: thread.providerInstanceId,
+            pullRequest,
+            findings: input.findings,
+          })
+          .pipe(
+            Effect.mapError(
+              (error) =>
+                new ReviewFindingReportFailedError({ detail: error.message, cause: error }),
+            ),
+          );
+        return {
+          pullRequest: `${result.pullRequest.repository}#${result.pullRequest.number}`,
+          findings: result.findings.map(({ id, title }) => ({ id, title })),
+          message:
+            "Shown to the user as cards they can dismiss, post, or reply to; don't repeat them in your reply, give a short summary and your verdict.",
         };
       }),
     ),

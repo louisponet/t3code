@@ -27,6 +27,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   workEntryRowLabel,
   isContextHandoffActivityGroup,
+  isReviewFindingActivityGroup,
   buildThreadFeed,
   deriveThreadFeedPresentation,
   threadFeedActivityIsVisible,
@@ -789,6 +790,43 @@ describe("buildThreadFeed", () => {
       "synthetic",
     ]);
     expect(activities.at(-1)?.prominent).toBe(true);
+  });
+
+  it("gives each review finding its own prominent card between tool rows", () => {
+    const finding: OrchestrationV2TurnItem = {
+      ...base("item-finding", "2026-06-20T00:00:02.500Z", 2),
+      type: "review_finding",
+      findingId: "1",
+      severity: "major",
+      title: "Unchecked index",
+      body: "",
+      path: "src/a.ts",
+      line: 3,
+      pullRequest: {
+        host: "github.com",
+        repository: "t3tools/t3code",
+        number: 7,
+        url: "https://github.com/t3tools/t3code/pull/7",
+      },
+      headSha: "abc123",
+      findingStatus: "open",
+    };
+    const laterCommand = {
+      ...command("2026-06-20T00:00:03.000Z"),
+      id: TurnItemId.make("item-command-later"),
+      ordinal: 3,
+    };
+
+    const groups = buildThreadFeed([
+      projected(command(), 0),
+      projected(finding, 1),
+      projected(laterCommand, 2),
+    ]).filter((entry) => entry.type === "activity-group");
+
+    const findingGroups = groups.filter(isReviewFindingActivityGroup);
+    expect(findingGroups).toHaveLength(1);
+    expect(findingGroups[0]?.activities[0]?.prominent).toBe(true);
+    expect(findingGroups[0]?.activities[0]?.projectedItem.item).toBe(finding);
   });
 
   it("keeps orchestration relationship cards visible when a completed run is folded", () => {

@@ -1319,6 +1319,54 @@ const OrchestrationV2SecretRequestFields = {
   secretStatus: OrchestrationV2SecretRequestStatus,
 } as const;
 
+export const REVIEW_FINDING_TITLE_MAX_CHARS = 200;
+export const REVIEW_FINDING_BODY_MAX_CHARS = 8_000;
+
+export const OrchestrationV2ReviewFindingStatus = Schema.Literals(["open", "dismissed", "posted"]);
+export type OrchestrationV2ReviewFindingStatus = typeof OrchestrationV2ReviewFindingStatus.Type;
+
+export const OrchestrationV2ReviewFindingSeverity = Schema.Literals([
+  "critical",
+  "major",
+  "minor",
+  "nit",
+]);
+export type OrchestrationV2ReviewFindingSeverity = typeof OrchestrationV2ReviewFindingSeverity.Type;
+
+/** What the reviewing agent reports; the server adds the pull request and the status. */
+export const OrchestrationV2ReviewFindingContent = Schema.Struct({
+  severity: Schema.optional(OrchestrationV2ReviewFindingSeverity),
+  title: TrimmedNonEmptyString.check(Schema.isMaxLength(REVIEW_FINDING_TITLE_MAX_CHARS)),
+  body: Schema.String.check(Schema.isMaxLength(REVIEW_FINDING_BODY_MAX_CHARS)),
+  path: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(2_048))),
+  line: Schema.optional(PositiveInt),
+  endLine: Schema.optional(PositiveInt),
+});
+export type OrchestrationV2ReviewFindingContent = typeof OrchestrationV2ReviewFindingContent.Type;
+
+export const OrchestrationV2ReviewFindingPullRequest = Schema.Struct({
+  ...ThreadPullRequestKey.fields,
+  url: TrimmedNonEmptyString,
+});
+export type OrchestrationV2ReviewFindingPullRequest =
+  typeof OrchestrationV2ReviewFindingPullRequest.Type;
+
+const OrchestrationV2ReviewFindingRecordFields = {
+  /** Short and thread-unique ("3") so the user and the agent can name a finding in chat. */
+  findingId: TrimmedNonEmptyString.check(Schema.isMaxLength(64)),
+  ...OrchestrationV2ReviewFindingContent.fields,
+  pullRequest: OrchestrationV2ReviewFindingPullRequest,
+  /** Head the finding's lines refer to; null when the host could not be read at report time. */
+  headSha: Schema.NullOr(TrimmedNonEmptyString),
+} as const;
+
+const OrchestrationV2ReviewFindingFields = {
+  type: Schema.Literal("review_finding"),
+  ...OrchestrationV2ReviewFindingRecordFields,
+  findingStatus: OrchestrationV2ReviewFindingStatus,
+  postedAs: Schema.optional(Schema.Literals(["inline", "comment"])),
+} as const;
+
 export const OrchestrationV2TurnItem = Schema.Union([
   Schema.Struct({
     ...OrchestrationV2TurnItemBaseFields,
@@ -1496,6 +1544,10 @@ export const OrchestrationV2TurnItem = Schema.Union([
   Schema.Struct({
     ...OrchestrationV2TurnItemBaseFields,
     ...OrchestrationV2SecretRequestFields,
+  }),
+  Schema.Struct({
+    ...OrchestrationV2TurnItemBaseFields,
+    ...OrchestrationV2ReviewFindingFields,
   }),
   Schema.Struct({
     ...OrchestrationV2TurnItemBaseFields,
@@ -2251,6 +2303,10 @@ export const OrchestrationV2TurnItemJson = Schema.Union([
   Schema.Struct({
     ...OrchestrationV2TurnItemJsonBaseFields,
     ...OrchestrationV2SecretRequestFields,
+  }),
+  Schema.Struct({
+    ...OrchestrationV2TurnItemJsonBaseFields,
+    ...OrchestrationV2ReviewFindingFields,
   }),
   Schema.Struct({
     ...OrchestrationV2TurnItemJsonBaseFields,
@@ -3036,6 +3092,28 @@ const OrchestrationV2InternalCommand = Schema.Union([
     reason: Schema.String,
     placeholder: Schema.optional(Schema.String),
     secretStatus: OrchestrationV2SecretRequestStatus,
+  }),
+  /**
+   * Creates a finding card in the reporting run, or revises one in place. Internal so findings
+   * only come from the report tool, which resolves the pull request they belong to.
+   */
+  Schema.Struct({
+    type: Schema.Literal("review_finding.record"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    runId: RunId,
+    nodeId: NodeId,
+    turnItemId: TurnItemId,
+    ...OrchestrationV2ReviewFindingRecordFields,
+  }),
+  /** Internal so no client can mark a finding posted without it reaching the pull request. */
+  Schema.Struct({
+    type: Schema.Literal("review_finding.status"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    turnItemId: TurnItemId,
+    findingStatus: OrchestrationV2ReviewFindingStatus,
+    postedAs: Schema.optional(Schema.Literals(["inline", "comment"])),
   }),
 ]);
 export type OrchestrationV2InternalCommand = typeof OrchestrationV2InternalCommand.Type;

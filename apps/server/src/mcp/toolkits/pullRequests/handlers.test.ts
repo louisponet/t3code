@@ -26,6 +26,7 @@ import {
 } from "../../../orchestration-v2/testkit/pullRequestFixtures.ts";
 import * as ProjectService from "../../../project/ProjectService.ts";
 import * as PullRequestReviewGuideService from "../../../pullRequest/PullRequestReviewGuideService.ts";
+import * as ReviewFindingService from "../../../pullRequest/ReviewFindingService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import * as McpToolAccessTestkit from "../../McpToolAccess.testkit.ts";
@@ -40,6 +41,8 @@ const testCrypto = Crypto.make({
   randomBytes: (size) => new Uint8Array(size).fill(7),
   digest: (_algorithm, data) => Effect.succeed(data),
 });
+
+type Report = ReviewFindingService.ReviewFindingService["Service"]["report"];
 
 const invocation = (
   capabilities: ReadonlyArray<McpInvocationContext.McpCapability>,
@@ -145,6 +148,8 @@ interface HarnessOptions {
     PullRequestReviewGuideResult & { started: boolean },
     PullRequestOperationError
   >;
+  readonly report?: Report;
+  readonly scope?: McpInvocationContext.McpInvocationScope;
 }
 
 const NO_GUIDE: PullRequestReviewGuideResult = { guide: null, run: null, currentHeadSha: "head-1" };
@@ -154,6 +159,7 @@ const makeHarness = Effect.fn("makePullRequestsToolkitHarness")(function* (
 ) {
   const commands = yield* Ref.make<ReadonlyArray<OrchestrationCommand>>([]);
   const guideRequests = yield* Ref.make<ReadonlyArray<PullRequestRef>>([]);
+  const reports = yield* Ref.make<ReadonlyArray<Parameters<Report>[0]>>([]);
   const thread = options.thread === undefined ? makeThread([]) : options.thread;
   const project = options.project === undefined ? makeProject() : options.project;
   const dispatch: Orchestrator.OrchestratorV2Shape["dispatch"] = (command) =>
@@ -191,6 +197,27 @@ const makeHarness = Effect.fn("makePullRequestsToolkitHarness")(function* (
           ),
         ),
     }),
+    Layer.mock(ReviewFindingService.ReviewFindingService)({
+      report: (input) =>
+        Ref.update(reports, (recorded) => [...recorded, input]).pipe(
+          Effect.andThen(
+            options.report?.(input) ??
+              Effect.succeed({
+                pullRequest: {
+                  host: "github.com",
+                  repository: "t3tools/t3code",
+                  number: 12,
+                  url: "https://github.com/t3tools/t3code/pull/12",
+                },
+                findings: input.findings.map((finding) => ({
+                  id: finding.id ?? "new",
+                  title: finding.title,
+                  revised: finding.id !== undefined,
+                })),
+              }),
+          ),
+        ),
+    }),
     Layer.mock(Orchestrator.OrchestratorV2)({
       getThreadShell: (id) =>
         Effect.succeed(id === THREAD_ID && thread ? v2PullRequestThread(thread) : null),
@@ -217,10 +244,13 @@ const makeHarness = Effect.fn("makePullRequestsToolkitHarness")(function* (
       Effect.map(
         (chunk) => chunk.at(-1)!.result as Tool.Success<(typeof PullRequestsToolkit.tools)[Name]>,
       ),
-      Effect.provideService(McpInvocationContext.McpInvocationContext, invocation(capabilities)),
+      Effect.provideService(
+        McpInvocationContext.McpInvocationContext,
+        options.scope ?? invocation(capabilities),
+      ),
       Effect.provide(layerDependencies),
     );
-  return { commands, guideRequests, call };
+  return { commands, guideRequests, reports, call };
 });
 
 describe("pull request toolkit handlers", () => {
@@ -741,6 +771,82 @@ describe("pull request guide tools", () => {
         number: 3,
       });
       expect(result).toMatchObject({ number: 3, guide: null, run: null, stale: false });
+    }),
+  );
+});
+
+describe("report_review_findings", () => {
+  const findings = [
+    {
+      severity: "major" as const,
+      title: "Leaks the handle",
+      body: "Fails when…",
+      path: "a.ts",
+      line: 3,
+    },
+    { id: "1", title: "Revised", body: "" },
+  ];
+
+  it.effect("reports for the resolved pull request as the calling thread and provider", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness();
+      const result = yield* harness.call("report_review_findings", {
+        pullRequest: { repository: "T3Tools/T3Code", number: 12 },
+        findings,
+      });
+      expect(result.findings).toEqual([
+        { id: "new", title: "Leaks the handle" },
+        { id: "1", title: "Revised" },
+      ]);
+      yield* harness.call("report_review_findings", { findings: findings.slice(0, 1) });
+      expect(yield* Ref.get(harness.reports)).toEqual([
+        {
+          threadId: THREAD_ID,
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          pullRequest: { host: "github.com", repository: "t3tools/t3code", number: 12 },
+          findings,
+        },
+        {
+          threadId: THREAD_ID,
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          pullRequest: undefined,
+          findings: findings.slice(0, 1),
+        },
+      ]);
+    }),
+  );
+
+  it.effect("refuses an MCP client that is not running inside a thread", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({
+        scope: {
+          ...invocation(["pull-requests"]),
+          thread: undefined,
+          client: { sessionId: "session-1", label: "Claude Code", access: "auto" },
+        },
+      });
+      const error = yield* harness
+        .call("report_review_findings", { findings: findings.slice(0, 1) })
+        .pipe(Effect.flip);
+      expect(error).toMatchObject({
+        _tag: "OrchestratorMcpFailure",
+        code: "thread_credential_required",
+      });
+      expect(yield* Ref.get(harness.reports)).toEqual([]);
+    }),
+  );
+
+  it.effect("passes the service's refusal to the agent as the tool error", () =>
+    Effect.gen(function* () {
+      const refusal = new ReviewFindingService.ReviewFindingReportError({
+        reason: "no_pull_request",
+      });
+      const harness = yield* makeHarness({ report: () => Effect.fail(refusal) });
+      const error = yield* harness
+        .call("report_review_findings", { findings: findings.slice(0, 1) })
+        .pipe(Effect.flip);
+      expect(error).toMatchObject({ _tag: "ReviewFindingReportFailedError" });
+      expect(error.message).toBe(refusal.message);
     }),
   );
 });

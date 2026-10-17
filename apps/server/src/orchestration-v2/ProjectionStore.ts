@@ -93,6 +93,14 @@ import {
   OLDER_THREAD_USER_TURN_LIMIT,
 } from "./threadHistoryPaging.ts";
 
+// A reviewer's findings are its output: its reply only summarizes them.
+const MESSAGES_VIEW_ITEM_TYPES: ReadonlySet<string> = new Set([
+  "user_message",
+  "assistant_message",
+  "proposed_plan",
+  "review_finding",
+]);
+
 export class ProjectionStoreApplyEventError extends Schema.TaggedError<ProjectionStoreApplyEventError>()(
   "ProjectionStoreApplyEventError",
   {
@@ -5107,10 +5115,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               .filter((row) =>
                 options.itemId === undefined
                   ? row.position > (options.afterPosition ?? -1) &&
-                    (options.view === "activity" ||
-                      ["user_message", "assistant_message", "proposed_plan"].includes(
-                        row.item.type,
-                      ))
+                    (options.view === "activity" || MESSAGES_VIEW_ITEM_TYPES.has(row.item.type))
                   : row.sourceItemId === options.itemId,
               );
             const page = matching.slice(0, options.limit);
@@ -6698,8 +6703,7 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
             const matching = projection.visibleTurnItems.filter((row) =>
               options.itemId === undefined
                 ? row.position > (options.afterPosition ?? -1) &&
-                  (options.view === "activity" ||
-                    ["user_message", "assistant_message", "proposed_plan"].includes(row.item.type))
+                  (options.view === "activity" || MESSAGES_VIEW_ITEM_TYPES.has(row.item.type))
                 : row.sourceItemId === options.itemId,
             );
             return {

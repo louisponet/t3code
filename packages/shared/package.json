@@ -415,6 +415,10 @@
       "types": "./src/gitPatchPath.ts",
       "import": "./src/gitPatchPath.ts"
     },
+    "./reviewFinding": {
+      "types": "./src/reviewFinding.ts",
+      "import": "./src/reviewFinding.ts"
+    },
     "./providerAuthReturnUrl": {
       "types": "./src/providerAuthReturnUrl.ts",
       "import": "./src/providerAuthReturnUrl.ts"

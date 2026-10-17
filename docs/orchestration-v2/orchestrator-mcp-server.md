@@ -363,7 +363,7 @@ bounded and offset-paginated. Deleted threads are never listed.
 Reads the durable state, recent runs, and visible timeline of any thread in
 the environment by thread ID. A deleted thread returns `thread_not_found`. The
 default `messages` view returns user messages, assistant
-messages, and proposed plans. The `activity` view also returns summarized tool,
+messages, proposed plans, and review findings. The `activity` view also returns summarized tool,
 reasoning, checkpoint, handoff, and runtime-request items. Large item text is
 bounded and reports whether it was truncated. `afterPosition` and
 `nextPosition` support incremental reads.

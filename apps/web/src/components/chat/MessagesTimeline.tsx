@@ -292,6 +292,7 @@ import {
   V2LifecycleRow,
   type HandoffTimelineRun,
 } from "./V2LifecycleRow";
+import { ReviewFindingCard } from "./ReviewFindingCard";
 import { SecretRequestCard } from "./SecretRequestCard";
 import { TimelineSystemDivider } from "./TimelineSystemDivider";
 
@@ -3102,6 +3103,18 @@ function V2EventTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "event"
         environmentId={ctx.activeThreadEnvironmentId}
         item={item}
         visibility={visibility}
+      />
+    );
+  }
+  if (item.type === "review_finding") {
+    return (
+      <ReviewFindingCard
+        environmentId={ctx.activeThreadEnvironmentId}
+        item={item}
+        visibility={visibility}
+        markdownCwd={ctx.markdownCwd}
+        threadRef={ctx.threadRef}
+        onOpenPullRequest={ctx.openPullRequest}
       />
     );
   }

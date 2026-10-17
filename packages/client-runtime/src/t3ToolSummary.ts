@@ -421,6 +421,21 @@ export function summarizeT3ToolCalls(
     case "read-pr-guide":
       label = phrase("Read", "read", quantity(selected.length, "review guide"));
       break;
+    case "report-findings": {
+      // Counted from input: clients never receive this tool's output.
+      const countsKnown = selected.every((call) => Array.isArray(call.input?.findings));
+      const reported = selected.reduce(
+        (count, call) =>
+          count + (Array.isArray(call.input?.findings) ? call.input.findings.length : 0),
+        0,
+      );
+      label = phrase(
+        "Reported",
+        "report",
+        countsKnown ? quantity(reported, "review finding") : `review findings ${times}`,
+      );
+      break;
+    }
     case "browser":
       label = phrase("Used", "use", `browser ${times}`);
       break;

@@ -147,6 +147,18 @@ describe("RPC authorization scopes", () => {
     );
   });
 
+  it("requires source control writes to post a review finding, unlike dismissing or replying", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.reviewFindingsPost)).toBe(
+      AuthSourceControlWriteScope,
+    );
+    expect(requiredScopeForRpcMethod(WS_METHODS.reviewFindingsSetStatus)).toBe(
+      AuthOrchestrationOperateScope,
+    );
+    expect(requiredScopeForRpcMethod(WS_METHODS.reviewFindingsComment)).toBe(
+      AuthOrchestrationOperateScope,
+    );
+  });
+
   it("separates preview control from observation", () => {
     for (const method of [
       WS_METHODS.previewOpen,

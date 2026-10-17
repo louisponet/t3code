@@ -44,6 +44,20 @@ describe("summarizeT3ToolCalls", () => {
     expect(allFailed.failedCount).toBe(2);
   });
 
+  it("counts review findings from the input, falling back when an input was summarized", () => {
+    const findings = (count: number) => ({
+      findings: Array.from({ length: count }, (_, index) => ({ title: `Finding ${index}` })),
+    });
+    expect(
+      summarizeT3ToolCalls("report-findings", [completed(findings(3)), completed(findings(1))])
+        .label,
+    ).toBe("Reported 4 review findings");
+    expect(
+      summarizeT3ToolCalls("report-findings", [completed(findings(2)), completed("{ … large")])
+        .label,
+    ).toBe("Reported review findings 2 times");
+  });
+
   it.each([
     ["queue-read", "Read 1 queued message"],
     ["queue-edit", "Edited 1 queued message"],

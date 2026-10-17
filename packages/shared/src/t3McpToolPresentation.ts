@@ -61,6 +61,7 @@ export type T3McpToolSummaryAction =
   | "unwatch-pr"
   | "write-pr-guides"
   | "read-pr-guide"
+  | "report-findings"
   | "browser"
   | "device"
   | "html-preview"
@@ -118,6 +119,11 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
   read_pull_request_guide: tool(
     ["Read", "Reading", "Read", "a review guide"],
     "read-pr-guide",
+    "pull-request",
+  ),
+  report_review_findings: tool(
+    ["Report", "Reporting", "Reported", "review findings"],
+    "report-findings",
     "pull-request",
   ),
   orchestrator_capabilities: tool(

@@ -59,6 +59,7 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
+import { reviewFindingLocation } from "@t3tools/shared/reviewFinding";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -827,6 +828,14 @@ function turnItemText(item: OrchestrationV2TurnItem): string | null {
       return `Created thread ${item.targetThreadId} with ${item.targetProviderInstanceId} (${item.targetModel}).`;
     case "secret_request":
       return `Asked the user for ${item.label}: ${item.secretStatus}.`;
+    case "review_finding":
+      return [
+        `Finding ${item.findingId} (${item.findingStatus}): ${item.title}`,
+        reviewFindingLocation(item),
+        item.body,
+      ]
+        .filter((line): line is string => line !== null && line !== "")
+        .join("\n");
     case "subagent":
       return item.result ?? item.progress ?? item.prompt;
     case "dynamic_tool":

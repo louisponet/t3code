@@ -149,11 +149,14 @@ export default function DiffPanel({
           keybindings={config?.keybindings ?? DEFAULT_RESOLVED_KEYBINDINGS}
           options={{
             baseline: comparison.baseline,
-            revision: comparison.revision,
-            ignoreWhitespace: comparison.ignoreWhitespace,
-            ...(comparison.filePaths ? { filePaths: comparison.filePaths } : {}),
             worktreePath: comparison.cwd,
-            ...(selection.filePath ? { filePath: selection.filePath } : {}),
+            ...(selection.filePath
+              ? { filePath: selection.filePath }
+              : {
+                  revision: comparison.revision,
+                  ignoreWhitespace: comparison.ignoreWhitespace,
+                  ...(comparison.filePaths ? { filePaths: comparison.filePaths } : {}),
+                }),
           }}
           requestId={selection.revealRequestId}
         />

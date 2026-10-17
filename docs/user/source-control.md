@@ -29,8 +29,12 @@ way to open Helix.
 Files in folders without Git or before the first commit still open for editing.
 Review comparisons and agent feedback become available after the first Git commit.
 
-Select a comparison from the thread's changes to review it in HX. Historical
-turn reviews show the exact saved revisions and are read-only; branch comparisons
+Click a changed file in the conversation to edit its current contents against
+the snapshot before that turn, starting at its first changed hunk. Reopening the
+same file returns to that hunk and preserves unsaved edits.
+
+Select a comparison from the thread's changes to review it in HX. Whole-turn
+reviews show the exact saved revisions and are read-only; branch comparisons
 use the resolved merge base and include current edits. **Uncommitted** compares
 current edits with `HEAD`. Older servers need an update before opening saved
 comparisons in Helix.

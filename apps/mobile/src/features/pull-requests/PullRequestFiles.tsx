@@ -122,12 +122,31 @@ export function usePullRequestFilesContent(props: {
                 ) : null}
               </View>
               <PullRequestDiffStats additions={file.additions} deletions={file.deletions} compact />
-              {viewed.isViewed(file.path) ? (
-                <SymbolView
-                  name="checkmark.circle.fill"
-                  size={18}
-                  tintColorClassName="accent-adaptive-emerald-600-400"
-                />
+              {viewed.supported ? (
+                <Pressable
+                  accessibilityRole="checkbox"
+                  accessibilityLabel={`Mark ${file.path} ${viewed.isViewed(file.path) ? "unviewed" : "viewed"}`}
+                  accessibilityState={{
+                    checked: viewed.isViewed(file.path),
+                    disabled: !viewed.canToggle,
+                  }}
+                  disabled={!viewed.canToggle}
+                  onPress={(event) => {
+                    event.stopPropagation();
+                    void viewed.toggle(file.path);
+                  }}
+                  className="min-h-11 min-w-11 items-center justify-center"
+                >
+                  <SymbolView
+                    name={viewed.isViewed(file.path) ? "checkmark.circle.fill" : "circle"}
+                    size={20}
+                    tintColorClassName={
+                      viewed.isViewed(file.path)
+                        ? "accent-adaptive-emerald-600-400"
+                        : "accent-icon-muted"
+                    }
+                  />
+                </Pressable>
               ) : null}
               <SymbolView name="chevron.right" size={12} tintColorClassName="accent-icon-muted" />
             </Pressable>

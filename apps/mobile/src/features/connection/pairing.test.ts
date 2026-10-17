@@ -5,7 +5,57 @@ import {
   extractPairingUrlFromQrPayload,
   PairingQrPayloadEmptyError,
   parsePairingUrl,
+  resolveDevelopmentPairingLink,
 } from "./pairing";
+
+describe("development pairing links", () => {
+  const pairingUrl = "http://100.127.115.63:13773/pair#token=one-time-code";
+
+  it("opens a one-time pairing link in a standalone development app", () => {
+    const link = new URL("t3code-dev://connections/new");
+    link.searchParams.set("pairingUrl", pairingUrl);
+    link.searchParams.set("autoConnect", "1");
+    const resolved = resolveDevelopmentPairingLink({
+      isDevelopment: false,
+      appVariant: "development",
+      pairingUrl: link.searchParams.get("pairingUrl")!,
+      autoConnect: link.searchParams.get("autoConnect")!,
+    });
+    expect(resolved).toEqual({ pairingUrl, autoConnect: true });
+    expect(parsePairingUrl(resolved.pairingUrl)).toEqual({
+      host: "http://100.127.115.63:13773",
+      code: "one-time-code",
+    });
+  });
+
+  it.each(["production", "preview", undefined, null])(
+    "does not prefill or connect links in a standalone %s app",
+    (appVariant) => {
+      expect(
+        resolveDevelopmentPairingLink({
+          isDevelopment: false,
+          appVariant,
+          pairingUrl,
+          autoConnect: "1",
+        }),
+      ).toEqual({ pairingUrl: "", autoConnect: false });
+    },
+  );
+
+  it("keeps debug automation available and requires an explicit nonempty auto-connect request", () => {
+    expect(
+      resolveDevelopmentPairingLink({ isDevelopment: true, appVariant: "production", pairingUrl }),
+    ).toEqual({ pairingUrl, autoConnect: false });
+    expect(
+      resolveDevelopmentPairingLink({
+        isDevelopment: false,
+        appVariant: "development",
+        pairingUrl: "  ",
+        autoConnect: "true",
+      }),
+    ).toEqual({ pairingUrl: "", autoConnect: false });
+  });
+});
 
 describe("buildPairingUrl", () => {
   it("uses HTTP for a schemeless IP address", () => {

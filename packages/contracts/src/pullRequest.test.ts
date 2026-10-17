@@ -10,6 +10,7 @@ import {
   PullRequestListResult,
   PullRequestReviewerRequestInput,
   PullRequestSetFilesViewedInput,
+  PullRequestSubmitReviewInput,
   pullRequestHostOf,
   resolvePullRequestAuthorFilter,
 } from "./pullRequest.ts";
@@ -20,6 +21,37 @@ const decodeReviewerRequest = Schema.decodeUnknownSync(PullRequestReviewerReques
 const decodeAction = Schema.decodeUnknownSync(PullRequestActionInput);
 const decodeSetFilesViewed = Schema.decodeUnknownSync(PullRequestSetFilesViewedInput);
 const decodeFilesViewed = Schema.decodeUnknownSync(PullRequestFilesViewedResult);
+
+describe("PullRequestSubmitReviewInput", () => {
+  const decode = Schema.decodeUnknownSync(PullRequestSubmitReviewInput);
+  const input = {
+    projectId: "project-1",
+    repository: "acme/web",
+    number: 1,
+    expectedHeadSha: "frozen-head",
+    verdict: "comment",
+    body: "Review",
+    comments: [
+      {
+        path: "src/a.ts",
+        position: { kind: "added", newLine: 8 },
+        startLine: 6,
+        replyTo: "123",
+        body: "A reply must reach the service for explicit rejection.",
+      },
+    ],
+  };
+
+  it("preserves the frozen head, range and reply marker across decoding", () => {
+    expect(decode(input)).toEqual(input);
+  });
+
+  it("rejects nonpositive or fractional range starts", () => {
+    for (const startLine of [0, -1, 1.5]) {
+      expect(() => decode({ ...input, comments: [{ ...input.comments[0], startLine }] })).toThrow();
+    }
+  });
+});
 
 const LIST_RESULT: PullRequestListResult = {
   viewers: { "github.com": "bilal", "gitlab.com": "bilal.hassan" },

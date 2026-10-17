@@ -464,6 +464,7 @@ import { ChatHeader } from "./chat/ChatHeader";
 import { useRemoteOpenState } from "~/remoteOpen";
 import { shouldShowOpenInPicker } from "./chat/OpenInPicker.logic";
 import { useOpenFavoriteEditorShortcut } from "./chat/OpenInPickerShortcut";
+import { subscribeHelixReview } from "./chat/helixReview";
 import {
   PanelLayoutControls,
   type PanelLayoutControlsProps,
@@ -4809,6 +4810,7 @@ export default function ChatView(props: ChatViewProps) {
       worktreePath?: string | null;
       preferNewTerminal?: boolean;
       rememberAsLastInvoked?: boolean;
+      terminalId?: string;
     },
   ) => {
     if (!hasTerminalWriteAccess() || !activeThreadId || !activeProject || !activeThread) return;
@@ -4824,6 +4826,7 @@ export default function ChatView(props: ChatViewProps) {
     const isBaseTerminalBusy = runningTerminalIds.includes(baseTerminalId);
     const wantsNewTerminal = Boolean(options?.preferNewTerminal) || isBaseTerminalBusy;
     const shouldCreateNewTerminal =
+      options?.terminalId !== undefined ||
       wantsNewTerminal ||
       !canReuseTerminal ||
       !readEnvironmentScope(environmentId, AuthTerminalReadScope);
@@ -4834,7 +4837,7 @@ export default function ChatView(props: ChatViewProps) {
       cwd: targetCwd,
       worktreePath: targetWorktreePath,
     });
-    setTerminalOpen(true);
+    if (options?.terminalId === undefined) setTerminalOpen(true);
     if (!activeThreadRef) {
       return;
     }
@@ -4847,7 +4850,8 @@ export default function ChatView(props: ChatViewProps) {
       worktreePath: targetWorktreePath,
       ...(options?.env ? { extraEnv: options.env } : {}),
     });
-    const targetTerminalId = shouldCreateNewTerminal ? allocateTerminalId() : baseTerminalId;
+    const targetTerminalId =
+      options?.terminalId ?? (shouldCreateNewTerminal ? allocateTerminalId() : baseTerminalId);
     const openTerminalInput: TerminalOpenInput = shouldCreateNewTerminal
       ? {
           threadId: activeThreadId,
@@ -4922,6 +4926,22 @@ export default function ChatView(props: ChatViewProps) {
     }
   };
   const runProjectScriptStable = useStableCallback(runProjectScript);
+  const canReviewInHelix = isServerThread && activeProject !== null;
+  const reviewInHelix = useStableCallback(() => {
+    if (!activeThreadRef) return;
+    useDiffPanelStore.getState().selectGitScope(activeThreadRef, "branch");
+    useRightPanelStore.getState().open(activeThreadRef, "diff");
+    onDiffPanelOpen?.();
+  });
+  useEffect(
+    () =>
+      subscribeHelixReview((threadRef) => {
+        if (threadRef.environmentId === environmentId && threadRef.threadId === activeThreadId) {
+          void reviewInHelix();
+        }
+      }),
+    [environmentId, activeThreadId, reviewInHelix],
+  );
 
   const runProjectScriptRef = useRef(runProjectScriptStable);
   useLayoutEffect(() => {
@@ -10729,6 +10749,7 @@ export default function ChatView(props: ChatViewProps) {
       : {}),
     onComposerFocusRequest: scheduleComposerFocusStable,
     ...(isServerThread && isGitRepo ? { onOpenChanges: openChangesFromThreadPanelStable } : {}),
+    ...(canReviewInHelix ? { onReviewInHelix: reviewInHelix } : {}),
     onRunProjectScript: runProjectScriptStable,
     onAddProjectScript: saveProjectScriptStable,
     onUpdateProjectScript: updateProjectScriptStable,

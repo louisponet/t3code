@@ -17,6 +17,7 @@ import { mediaFileReference } from "@t3tools/client-runtime/media-reference";
 
 import { ScreenContent } from "../../components/ui/ScreenContent";
 import { AudioFilePreview } from "./AudioFilePreview";
+import { Button } from "../../components/ui/Button";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { FilePreviewModal, type FilePreviewSource } from "../../components/FilePreviewModal";
 import { LoadingScreen } from "../../components/LoadingScreen";
@@ -47,7 +48,7 @@ import { ThreadInspectorContentStack } from "../threads/thread-inspector-content
 import { FileTreeBrowser } from "./FileTreeBrowser";
 import { useFileTreeEntries } from "./useFileTreeEntries";
 import { preloadWorkspaceFileContents } from "./preload-workspace-file";
-import { SourceFileSurface } from "./SourceFileSurface";
+import { useOpenInHelix } from "../terminal/useOpenInHelix";
 import { useNativeColumnLayoutMetrics } from "../../native/native-layout-metrics";
 import { ThreadFileNavigatorPane } from "./thread-file-navigator-pane";
 import { AppBar } from "../../components/ui/AppBar";
@@ -318,13 +319,9 @@ function FileContent(props: {
           onRefresh={props.onRefresh}
         />
       ) : (
-        <SourceFileSurface
-          contents={props.fileContents}
-          path={props.relativePath}
-          initialLine={props.initialLine}
-          headerInsetTop={props.truncated ? 0 : undefined}
-          onRefresh={props.onRefresh}
-        />
+        <FilePreviewNotice title="Open in Helix">
+          Open this file from its thread to view and edit the source.
+        </FilePreviewNotice>
       )}
     </View>
   );
@@ -619,6 +616,20 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps) {
       : defaultViewMode(relativePath);
   const resolvedActiveMode =
     isVideoFile || isAudioFile ? "preview" : canPreview ? activeMode : "source";
+  const helix = useOpenInHelix(environmentId, threadId);
+  const openedInHelix = useRef<string | null>(null);
+  const helixKey = JSON.stringify([environmentId, threadId, cwd, relativePath, targetLine]);
+  useEffect(() => {
+    if (
+      resolvedActiveMode !== "source" ||
+      relativePath === null ||
+      !helix.available ||
+      openedInHelix.current === helixKey
+    )
+      return;
+    if (helix.open({ filePath: relativePath, ...(targetLine ? { line: targetLine } : {}) }))
+      openedInHelix.current = helixKey;
+  }, [helix, helixKey, relativePath, resolvedActiveMode, targetLine]);
   const assetPreviewPath =
     isBrowserFile || isImageFile || isVideoFile || isAudioFile ? relativePath : null;
   const assetPreview = useWorkspaceFileAssetUrlState({
@@ -697,7 +708,8 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps) {
       environmentId !== null &&
       cwd !== null &&
       relativePath !== null &&
-      needsFileContents
+      needsFileContents &&
+      resolvedActiveMode !== "source"
       ? projectEnvironment.readFile({
           environmentId,
           input: { cwd, relativePath },
@@ -774,7 +786,7 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps) {
       canToggleMode
         ? ({
             id: "source",
-            title: "Source",
+            title: "Helix",
             icon: "doc.text",
             inline: true,
             onPress: () => setModeOverride({ path: relativePath, mode: "source" }),
@@ -913,6 +925,30 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps) {
       <View className="flex-1 items-center justify-center bg-sheet px-6">
         <NativeStackScreenOptions options={{ title: "Files" }} />
         <EmptyState title="File unavailable" detail="This file path is invalid." />
+      </View>
+    );
+  }
+
+  if (resolvedActiveMode === "source") {
+    return (
+      <View className="flex-1 bg-sheet">
+        <NativeStackScreenOptions options={{ title: basename(relativePath) }} />
+        <EmptyState
+          title={helix.available ? "Open in Helix" : "Helix unavailable"}
+          detail={
+            helix.available
+              ? "This file opens in the thread’s editor."
+              : "Open this file from a thread with terminal access on a supported host."
+          }
+        />
+        {helix.available ? (
+          <Button
+            label="Open in Helix"
+            onPress={() =>
+              helix.open({ filePath: relativePath, ...(targetLine ? { line: targetLine } : {}) })
+            }
+          />
+        ) : null}
       </View>
     );
   }

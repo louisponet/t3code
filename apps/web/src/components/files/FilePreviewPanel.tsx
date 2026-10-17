@@ -1,3 +1,4 @@
+import HelixPanel from "../HelixPanel";
 import { Spinner } from "~/components/ui/spinner";
 import {
   AuthPreviewOperateScope,
@@ -1396,7 +1397,7 @@ export default function FilePreviewPanel({
               alt={relativePath}
               workspaceMutationId={workspaceMutationId}
             />
-          ) : relativePath && renderBrowserFile && absolutePath ? (
+          ) : relativePath && renderBrowserFile && absolutePath && revealLine === null ? (
             <WorkspaceBrowserPreview
               key={absolutePath}
               environmentId={environmentId}
@@ -1440,7 +1441,7 @@ export default function FilePreviewPanel({
               <Spinner size="lg" />
             </div>
           ) : relativePath && file.data ? (
-            isMarkdown && renderMarkdown ? (
+            isMarkdown && renderMarkdown && revealLine === null ? (
               <RenderedMarkdownSurface
                 key={relativePath}
                 environmentId={environmentId}
@@ -1451,12 +1452,24 @@ export default function FilePreviewPanel({
                 readOnly={isHostFile || !canWriteFiles}
                 onPendingChange={onPendingChange}
               />
-            ) : tableDelimiter && renderTable ? (
+            ) : tableDelimiter && renderTable && revealLine === null ? (
               <DelimitedTablePreview
                 key={relativePath}
                 name={relativePath}
                 text={file.data.contents}
                 delimiter={tableDelimiter}
+              />
+            ) : attachment === undefined ? (
+              <HelixPanel
+                threadRef={threadRef}
+                cwd={cwd}
+                keybindings={keybindings}
+                options={{
+                  worktreePath: cwd,
+                  filePath: relativePath,
+                  ...(revealLine ? { line: revealLine } : {}),
+                }}
+                requestId={revealRequestId}
               />
             ) : file.data.truncated || isHostFile || !canWriteFiles ? (
               <SourceFilePreview

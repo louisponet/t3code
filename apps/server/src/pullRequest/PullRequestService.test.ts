@@ -468,6 +468,7 @@ const requestFailed = new PullRequestProviderError({
 
 const FULL_REVIEW: PullRequestReviewCapabilities = {
   inlineComment: true,
+  multilineComment: true,
   reply: true,
   resolve: true,
   verdicts: ["comment", "approve", "request-changes"],
@@ -3131,6 +3132,167 @@ it.effect(
       yield* service.submitReview({ ...reference, verdict: "approve", body: "", comments: [] });
       assert.isTrue(approved);
     }),
+);
+
+it.effect("checks the current head even when an older detail is cached", () =>
+  Effect.gen(function* () {
+    let headSha = "reviewed-head";
+    let reads = 0;
+    const service = yield* makeService({
+      projects: [
+        project({ id: "p1", title: "t3code", workspaceRoot: "/a", repository: "acme/web" }),
+      ],
+      providers: [
+        fakeProvider(SourceControlProviderKind.make("github"), {
+          getChangeRequest: () =>
+            Effect.sync(() => {
+              reads += 1;
+              return { ...hostedChangeRequest("Description"), headSha };
+            }),
+          submitReview: () => Effect.die("a stale review must not be submitted"),
+        }),
+      ],
+    });
+    const reference = { projectId: "p1" as ProjectId, repository: "acme/web", number: 1 };
+    yield* service.detail(reference);
+    headSha = "updated-head";
+    const error = yield* service
+      .submitReview({
+        ...reference,
+        expectedHeadSha: "reviewed-head",
+        verdict: "comment",
+        body: "Review",
+        comments: [],
+      })
+      .pipe(Effect.flip);
+    assert.strictEqual(error._tag, "PullRequestOperationError");
+    assert.include(error.message, "head changed");
+    assert.strictEqual(reads, 2);
+  }),
+);
+
+it.effect("checks permissions then the frozen head and forwards the full multiline draft", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    let submitted: Parameters<PullRequestProviderApi["submitReview"]>[0] | undefined;
+    const service = yield* makeService({
+      projects: [
+        project({ id: "p1", title: "t3code", workspaceRoot: "/a", repository: "acme/web" }),
+      ],
+      providers: [
+        fakeProvider(SourceControlProviderKind.make("github"), {
+          getViewerPermissions: () =>
+            Effect.sync(() => {
+              calls.push("permissions");
+              return hostedChangeRequest("").viewerPermissions;
+            }),
+          getChangeRequest: () =>
+            Effect.sync(() => {
+              calls.push("head");
+              return { ...hostedChangeRequest(""), headSha: "reviewed-head" };
+            }),
+          submitReview: (input) =>
+            Effect.sync(() => {
+              calls.push("submit");
+              submitted = input;
+            }),
+        }),
+      ],
+    });
+    const comments = [
+      {
+        path: "src/a.ts",
+        position: { kind: "added" as const, newLine: 8 },
+        startLine: 6,
+        body: "```suggestion\nreplacement\n```",
+      },
+    ];
+    yield* service.submitReview({
+      projectId: "p1" as ProjectId,
+      repository: "acme/web",
+      number: 1,
+      expectedHeadSha: "reviewed-head",
+      verdict: "comment",
+      body: "Review",
+      comments,
+    });
+    assert.deepStrictEqual(calls, ["permissions", "head", "submit"]);
+    assert.strictEqual(submitted?.expectedHeadSha, "reviewed-head");
+    assert.deepStrictEqual(submitted?.comments, comments);
+  }),
+);
+
+it.effect("refuses a frozen review when the host cannot report its head", () =>
+  Effect.gen(function* () {
+    const service = yield* makeService({
+      projects: [
+        project({ id: "p1", title: "t3code", workspaceRoot: "/a", repository: "acme/web" }),
+      ],
+      providers: [
+        fakeProvider(SourceControlProviderKind.make("github"), {
+          getChangeRequest: () => Effect.succeed(hostedChangeRequest("")),
+          submitReview: () => Effect.die("an unverified review must not be submitted"),
+        }),
+      ],
+    });
+    const error = yield* service
+      .submitReview({
+        projectId: "p1" as ProjectId,
+        repository: "acme/web",
+        number: 1,
+        expectedHeadSha: "reviewed-head",
+        verdict: "comment",
+        body: "Review",
+        comments: [],
+      })
+      .pipe(Effect.flip);
+    assert.strictEqual(error._tag, "PullRequestOperationError");
+  }),
+);
+
+it.effect("refuses unsupported ranges, reversed ranges and replies before any host write", () =>
+  Effect.gen(function* () {
+    const service = yield* makeService({
+      projects: [
+        project({ id: "p1", title: "t3code", workspaceRoot: "/a", repository: "acme/web" }),
+      ],
+      providers: [
+        fakeProvider(SourceControlProviderKind.make("github"), {
+          capabilities: {
+            diff: true,
+            comment: true,
+            actions: [],
+            mergeMethods: [],
+            search: true,
+            reactions: true,
+            review: { ...FULL_REVIEW, multilineComment: false },
+            reviewers: FULL_REVIEWERS,
+          },
+          submitReview: () => Effect.die("unsupported drafts must not be submitted"),
+        }),
+      ],
+    });
+    for (const [extra, message] of [
+      [{ startLine: 2 }, "cannot submit multiline"],
+      [{ startLine: 5 }, "first line must not follow"],
+      [{ replyTo: "123" }, "Replies must be submitted separately"],
+    ] as const) {
+      const error = yield* service
+        .submitReview({
+          projectId: "p1" as ProjectId,
+          repository: "acme/web",
+          number: 1,
+          verdict: "comment",
+          body: "",
+          comments: [
+            { path: "a.ts", position: { kind: "added", newLine: 4 }, body: "Review", ...extra },
+          ],
+        })
+        .pipe(Effect.flip);
+      assert.strictEqual(error._tag, "PullRequestOperationError");
+      assert.include(error.message, message);
+    }
+  }),
 );
 
 it.effect("refuses to resolve a conversation on a host that cannot", () =>

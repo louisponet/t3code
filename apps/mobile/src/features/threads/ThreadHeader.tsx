@@ -1,7 +1,8 @@
 import { useMemo } from "react";
+import { Platform } from "react-native";
 import { AppBar } from "../../components/ui/AppBar";
 import { ScreenHeaderButton } from "../../components/ui/ScreenHeaderButton";
-import type { AppBarAction } from "../../components/ui/AppBar.types";
+import type { AppBarAction, AppBarMenu } from "../../components/ui/AppBar.types";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
 import type { ThreadInspectorMode } from "./thread-inspector-content-stack";
 import { useThreadHeaderOptions } from "./useThreadHeaderOptions";
@@ -40,7 +41,18 @@ export function ThreadHeader(
         onPress: filesVisible ? toggleAuxiliaryPane : props.onOpenFilesInspector,
       });
     }
-    if (props.hasWorkspaceRoot && props.gitControls.canOpenTerminal) {
+    if (props.gitControls.onReviewInHelix) {
+      actions.push({
+        accessibilityLabel: "Open Helix editor",
+        icon: "chevron.left.forwardslash.chevron.right",
+        onPress: props.gitControls.onReviewInHelix,
+      });
+    }
+    if (
+      props.hasWorkspaceRoot &&
+      props.gitControls.canOpenTerminal &&
+      !props.gitControls.onReviewInHelix
+    ) {
       actions.push({
         accessibilityLabel: "Open terminal",
         icon: "terminal",
@@ -72,7 +84,34 @@ export function ThreadHeader(
     props.hasThreadCwd,
     props.hasWorkspaceRoot,
     props.gitControls.canOpenTerminal,
+    props.gitControls.onReviewInHelix,
   ]);
+  const androidHeaderMenus = useMemo<ReadonlyArray<AppBarMenu>>(
+    () =>
+      props.gitControls.onReviewInHelix
+        ? [
+            {
+              title: "Terminal",
+              icon: "terminal",
+              items: [
+                {
+                  id: "helix-review",
+                  title: "Review in HX",
+                  icon: "text.bubble",
+                  onPress: props.gitControls.onReviewInHelix,
+                },
+                {
+                  id: "open-terminal",
+                  title: "Open terminal",
+                  icon: "terminal",
+                  onPress: () => onOpenTerminal(null),
+                },
+              ],
+            },
+          ]
+        : [],
+    [onOpenTerminal, props.gitControls.onReviewInHelix],
+  );
 
   return (
     <>
@@ -98,6 +137,7 @@ export function ThreadHeader(
         }
         onBack={layout.usesSplitView ? undefined : returnToList}
         actions={androidHeaderActions}
+        menus={Platform.OS === "android" ? androidHeaderMenus : undefined}
         hideBottomBorder
       />
       {native.fallback}

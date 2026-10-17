@@ -2055,6 +2055,24 @@ export const make = Effect.gen(function* () {
         if (input.comments.length > 0 && !review.inlineComment) {
           return refuse("This host cannot comment on a line of a change request.");
         }
+        for (const comment of input.comments) {
+          if (comment.replyTo !== undefined) {
+            return refuse("Replies must be submitted separately from a review.");
+          }
+          if (comment.startLine === undefined) continue;
+          const endLine =
+            comment.position.kind === "added"
+              ? comment.position.newLine
+              : comment.position.kind === "deleted" || comment.position.side === "left"
+                ? comment.position.oldLine
+                : comment.position.newLine;
+          if (comment.startLine > endLine) {
+            return refuse("A review comment's first line must not follow its last line.");
+          }
+          if (comment.startLine < endLine && review.multilineComment !== true) {
+            return refuse("This host cannot submit multiline review comments.");
+          }
+        }
         if (
           input.verdict !== "approve" &&
           input.body.trim().length === 0 &&
@@ -2076,17 +2094,38 @@ export const make = Effect.gen(function* () {
                 "You need write access on this repository to comment on a line of a change request.",
               );
             }
+            const submit = () =>
+              project.api
+                .submitReview({
+                  cwd: project.project.workspaceRoot,
+                  repository: project.repository,
+                  host: project.host,
+                  number: input.number,
+                  ...(input.expectedHeadSha === undefined
+                    ? {}
+                    : { expectedHeadSha: input.expectedHeadSha }),
+                  verdict: input.verdict,
+                  body: input.body,
+                  comments: input.comments,
+                })
+                .pipe(Effect.mapError(toPullRequestError("submitReview")));
+            if (input.expectedHeadSha === undefined) return submit();
+            // Bypass the detail cache: the draft belongs to the commit the user reviewed.
             return project.api
-              .submitReview({
+              .getChangeRequest({
                 cwd: project.project.workspaceRoot,
                 repository: project.repository,
                 host: project.host,
                 number: input.number,
-                verdict: input.verdict,
-                body: input.body,
-                comments: input.comments,
               })
-              .pipe(Effect.mapError(toPullRequestError("submitReview")));
+              .pipe(
+                Effect.mapError(toPullRequestError("submitReview")),
+                Effect.flatMap((current) =>
+                  current.headSha !== input.expectedHeadSha
+                    ? refuse("The pull request head changed. Refresh the review before submitting.")
+                    : submit(),
+                ),
+              );
           }),
         );
       }),

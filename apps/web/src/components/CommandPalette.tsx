@@ -43,6 +43,8 @@ import {
   AuthOrchestrationOperateScope,
   AuthSourceControlWriteScope,
   AuthFilesystemReadScope,
+  AuthTerminalReadScope,
+  AuthTerminalOperateScope,
   type DesktopWslState,
   type EnvironmentId,
   type EnvironmentMachineKind,
@@ -79,6 +81,7 @@ import {
   TextSearchIcon,
 } from "lucide-react";
 import { requestThreadFindOpen } from "./chat/threadFindActionBus";
+import { requestHelixReview } from "./chat/helixReview";
 import {
   useCallback,
   useDeferredValue,
@@ -1029,6 +1032,9 @@ function OpenCommandPaletteDialog(props: {
   );
 
   const activeThreadId = activeThread?.id;
+  const activeThreadPlatform = environments.find(
+    (environment) => environment.environmentId === activeThread?.environmentId,
+  )?.serverConfig?.environment.platform.os;
   const supportsThreadFind =
     environments.find((environment) => environment.environmentId === activeThread?.environmentId)
       ?.serverConfig?.threadFind === true;
@@ -1829,6 +1835,24 @@ function OpenCommandPaletteDialog(props: {
       shortcutCommand: "chat.find",
       run: async () => {
         requestThreadFindOpen();
+      },
+    });
+  }
+
+  if (
+    activeThread &&
+    readEnvironmentScope(activeThread.environmentId, AuthTerminalReadScope) &&
+    readEnvironmentScope(activeThread.environmentId, AuthTerminalOperateScope) &&
+    (activeThreadPlatform === "linux" || activeThreadPlatform === "darwin")
+  ) {
+    actionItems.push({
+      kind: "action",
+      value: "review-in-helix",
+      title: "Review in HX",
+      searchTerms: ["helix", "hx", "review", "diff", "comments"],
+      icon: <FileSearchIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        requestHelixReview(scopeThreadRef(activeThread.environmentId, activeThread.id));
       },
     });
   }

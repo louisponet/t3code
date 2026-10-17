@@ -21,6 +21,12 @@ import { OpenInPicker } from "./OpenInPicker";
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
 import { ThreadAutomationsPanel } from "./ThreadAutomationsPanel";
 import { ThreadRelationshipsPanel } from "./ThreadRelationshipsControl";
+import { FileCheckIcon } from "lucide-react";
+import { ThreadDetailsControl } from "./ThreadDetailsControl";
+import {
+  THREAD_DETAILS_PANEL_ICON_CLASS,
+  THREAD_DETAILS_PANEL_LABEL_CLASS,
+} from "./threadDetailsPanelStyles";
 
 const GitActionsControl = memo(BaseGitActionsControl);
 
@@ -54,6 +60,7 @@ export interface ThreadDetailsPanelProps extends Pick<
   onCheckoutPullRequestRequest?: (reference: string) => void;
   onComposerFocusRequest: () => void;
   onOpenChanges?: () => void;
+  onReviewInHelix?: () => void;
   onRunProjectScript: (script: ProjectScript) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<ProjectScriptActionResult>;
   onUpdateProjectScript: (
@@ -128,6 +135,16 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                   openInCwd={props.gitCwd}
                   displayMode="panel"
                 />
+              ) : null}
+
+              {props.onReviewInHelix ? (
+                <ThreadDetailsControl
+                  onClick={props.onReviewInHelix}
+                  title="Review this thread in HX, or return to its open review."
+                >
+                  <FileCheckIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
+                  <span className={THREAD_DETAILS_PANEL_LABEL_CLASS}>Review in HX</span>
+                </ThreadDetailsControl>
               ) : null}
 
               {props.activeProjectScripts ? (

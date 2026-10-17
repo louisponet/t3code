@@ -1300,6 +1300,7 @@ interface TerminalManagerOptions {
   env?: NodeJS.ProcessEnv;
   managedBinaryCacheDir?: string;
   managedBinaryToolsDir?: string;
+  serverContext?: { readonly baseDir: string; readonly runtimeStatePath: string };
   subprocessInspector?: TerminalSubprocessInspector;
   processTable?: Effect.Effect<
     ReadonlyArray<ResourceMonitorProcessTableEntry>,
@@ -1369,7 +1370,8 @@ export const resolveProviderInstanceTerminalEnvironment = Effect.fn(
 
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.fn("TerminalManager.make")(function* () {
-  const { terminalLogsDir, providerStatusCacheDir, baseDir } = yield* ServerConfig.ServerConfig;
+  const { terminalLogsDir, providerStatusCacheDir, baseDir, serverRuntimeStatePath } =
+    yield* ServerConfig.ServerConfig;
   const ptyAdapter = yield* PtyAdapter.PtyAdapter;
   const portDiscovery = yield* PortScanner.PortDiscovery;
   const nativeTelemetry = yield* NativeTelemetryClient.NativeTelemetryClient;
@@ -1387,6 +1389,7 @@ export const make = Effect.fn("TerminalManager.make")(function* () {
   );
   return yield* makeWithOptions({
     logsDir: terminalLogsDir,
+    serverContext: { baseDir, runtimeStatePath: serverRuntimeStatePath },
     ptyAdapter,
     processTable: nativeTelemetry.processTable.pipe(
       Effect.mapError(
@@ -2209,6 +2212,20 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
               platform,
               yield* HostProcess.HomeDirectory,
             );
+            if (options.serverContext) {
+              // Commands must address the server that owns this terminal, including dev homes.
+              const reserved = new Set([
+                "t3code_home",
+                "t3code_server_runtime_path",
+                "t3code_thread_id",
+              ]);
+              for (const key of Object.keys(terminalEnv)) {
+                if (reserved.has(key.toLowerCase())) delete terminalEnv[key];
+              }
+              terminalEnv.T3CODE_HOME = options.serverContext.baseDir;
+              terminalEnv.T3CODE_SERVER_RUNTIME_PATH = options.serverContext.runtimeStatePath;
+              terminalEnv.T3CODE_THREAD_ID = session.threadId;
+            }
             // Append (never prepend) managed ACP agent install directories so
             // `kimi login` and friends resolve by name without shadowing any
             // system or user tool of the same name.

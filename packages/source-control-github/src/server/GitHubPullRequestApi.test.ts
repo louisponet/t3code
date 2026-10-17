@@ -3344,8 +3344,14 @@ layer("GitHubPullRequestApi.layer", (it) => {
 
   it.effect("reads a named commit from the commit endpoint rather than the whole diff", () =>
     Effect.gen(function* () {
+      const revision = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0";
+      const baseline = "1234567890123456789012345678901234567890";
       mockedExecute.mockReturnValueOnce(
-        Effect.succeed(output(`{"files":${pullRequestFiles(2, 1)}}`)),
+        Effect.succeed(
+          output(
+            `{"sha":"${revision}","parents":[{"sha":"${baseline}"}],"files":${pullRequestFiles(2, 1)}}`,
+          ),
+        ),
       );
       const cli = yield* GitHubPullRequestApi.GitHubPullRequestApi;
 
@@ -3359,11 +3365,37 @@ layer("GitHubPullRequestApi.layer", (it) => {
 
       assert.strictEqual(mockedExecute.mock.calls.length, 1);
       assert.isNull(diff.nextCursor);
+      assert.deepEqual(diff.helixComparison, { baseline, revision });
       expect(diff.patch).toContain("diff --git a/src/file1.ts b/src/file1.ts");
       assert.strictEqual(
         pathAt(0),
         "repos/acme/web/commits/a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0?per_page=100&page=1",
       );
+    }),
+  );
+
+  it.effect("exposes an empty-tree comparison for a root commit", () =>
+    Effect.gen(function* () {
+      const revision = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0";
+      mockedExecute.mockReturnValueOnce(
+        Effect.succeed(
+          output(`{"sha":"${revision}","parents":[],"files":${pullRequestFiles(1, 1)}}`),
+        ),
+      );
+      const cli = yield* GitHubPullRequestApi.GitHubPullRequestApi;
+      const diff = yield* cli.getPullRequestDiff({
+        cwd: "/w",
+        repository: "acme/web",
+        host: "github.com",
+        number: 7,
+        commit: revision,
+      });
+
+      assert.deepEqual(diff.helixComparison, {
+        baseline: "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+        revision,
+      });
+      assert.strictEqual(mockedExecute.mock.calls.length, 1);
     }),
   );
 
@@ -3700,6 +3732,7 @@ layer("GitHubPullRequestApi.layer", (it) => {
         repository: "acme/web",
         host: "github.com",
         number: 7,
+        expectedHeadSha: "frozen-head",
         verdict: "approve",
         body: "Looks right.",
         comments: [{ path: "src/a.ts", position: { kind: "added", newLine: 4 }, body: "nit" }],
@@ -3711,6 +3744,7 @@ layer("GitHubPullRequestApi.layer", (it) => {
           method: "POST",
           path: "repos/acme/web/pulls/7/reviews",
           body: {
+            commit_id: "frozen-head",
             event: "APPROVE",
             body: "Looks right.",
             comments: [{ path: "src/a.ts", line: 4, side: "RIGHT", body: "nit" }],

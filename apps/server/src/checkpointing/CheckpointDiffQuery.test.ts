@@ -75,12 +75,22 @@ it.effect("computes V2 run diffs from projected checkpoint scopes", () => {
   return Effect.gen(function* () {
     const query = yield* CheckpointDiffQuery.CheckpointDiffQuery;
     const result = yield* query.getFullThreadDiff({ threadId, toTurnCount: 2 });
+    const baseline = yield* checkpointRefForScopeOrdinal({
+      scopeId: firstScopeId,
+      ordinalWithinScope: 0,
+    });
 
     assert.deepEqual(result, {
       threadId,
       fromTurnCount: 0,
       toTurnCount: 2,
       diff: "diff --git a/file b/file",
+      helixComparison: {
+        cwd: "/repo",
+        baseline,
+        revision: secondRef,
+        ignoreWhitespace: true,
+      },
     });
     assert.deepEqual(diffCheckpoints.mock.calls[0]?.[0], {
       cwd: "/repo",
@@ -112,7 +122,7 @@ it.effect("leaves Git imports out of large turn diffs", () => {
 
   return Effect.gen(function* () {
     const query = yield* CheckpointDiffQuery.CheckpointDiffQuery;
-    yield* query.getFullThreadDiff({ threadId, toTurnCount: 2 });
+    const result = yield* query.getFullThreadDiff({ threadId, toTurnCount: 2 });
 
     const patchPaths = diffCheckpoints.mock.calls
       .map(([call]) => call)
@@ -120,6 +130,7 @@ it.effect("leaves Git imports out of large turn diffs", () => {
       .map((call) => call.filePaths ?? ["all"]);
     assert.isAbove(patchPaths.length, 1);
     assert.sameMembers(patchPaths.flat(), ownPaths);
+    assert.sameMembers([...(result.helixComparison?.filePaths ?? [])], ownPaths);
   }).pipe(Effect.provide(layer));
 });
 

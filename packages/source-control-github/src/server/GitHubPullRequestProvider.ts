@@ -34,6 +34,7 @@ const CAPABILITIES: PullRequestCapabilities = {
   viewedFiles: "host",
   review: {
     inlineComment: true,
+    multilineComment: true,
     reply: true,
     resolve: true,
     verdicts: ["comment", "approve", "request-changes"],

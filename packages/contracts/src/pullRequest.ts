@@ -238,6 +238,7 @@ export type PullRequestCommit = typeof PullRequestCommit.Type;
 
 export const PullRequestReviewCapabilities = Schema.Struct({
   inlineComment: Schema.Boolean,
+  multilineComment: Schema.optional(Schema.Boolean),
   reply: Schema.Boolean,
   resolve: Schema.Boolean,
   verdicts: Schema.Array(PullRequestReviewVerdict),
@@ -633,6 +634,12 @@ export type PullRequestOmittedFileStat = typeof PullRequestOmittedFileStat.Type;
 
 export const PullRequestDiffResult = Schema.Struct({
   patch: Schema.String,
+  helixComparison: Schema.optionalKey(
+    Schema.Struct({
+      baseline: TrimmedNonEmptyString,
+      revision: TrimmedNonEmptyString,
+    }),
+  ),
   /**
    * Something inside this slice could not be shown — a binary file, or a hunk the host declined
    * to inline. Not the same as there being more slices, which `nextCursor` answers.
@@ -767,6 +774,10 @@ export const PullRequestReviewCommentDraft = Schema.Struct({
    */
   oldPath: Schema.optional(TrimmedNonEmptyString),
   position: PullRequestReviewPosition,
+  /** The first line on the same side as position, which remains the range's last line. */
+  startLine: Schema.optional(PositiveInt),
+  /** Replies cannot be included in an atomic review; the service refuses them explicitly. */
+  replyTo: Schema.optional(TrimmedNonEmptyString),
   body: CommentBody,
 });
 export type PullRequestReviewCommentDraft = typeof PullRequestReviewCommentDraft.Type;
@@ -774,6 +785,7 @@ export type PullRequestReviewCommentDraft = typeof PullRequestReviewCommentDraft
 export const PullRequestSubmitReviewInput = Schema.Struct({
   ...PullRequestRef.fields,
   verdict: PullRequestReviewVerdict,
+  expectedHeadSha: Schema.optional(TrimmedNonEmptyString),
   body: Schema.String.check(Schema.isMaxLength(65_536)),
   comments: Schema.Array(PullRequestReviewCommentDraft),
 });

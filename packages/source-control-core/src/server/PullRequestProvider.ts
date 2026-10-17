@@ -204,6 +204,7 @@ export interface ProviderChangeRequestActivity {
 
 export interface ProviderDiffSlice {
   readonly patch: string;
+  readonly helixComparison?: { readonly baseline: string; readonly revision: string };
   /** Something in this slice could not be shown, as opposed to there being more slices. */
   readonly truncated: boolean;
   readonly nextCursor: string | null;
@@ -472,6 +473,7 @@ export interface PullRequestProviderApi {
   readonly submitReview: (
     input: ProviderRepositoryRef & {
       readonly number: number;
+      readonly expectedHeadSha?: string;
       readonly verdict: PullRequestReviewVerdict;
       readonly body: string;
       readonly comments: ReadonlyArray<PullRequestReviewCommentDraft>;

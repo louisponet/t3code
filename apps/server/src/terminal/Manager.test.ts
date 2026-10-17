@@ -256,6 +256,7 @@ interface CreateManagerOptions {
   >[0]["resolveProviderInstanceEnvironment"];
   managedBinaryCacheDir?: string;
   managedBinaryToolsDir?: string;
+  serverContext?: Parameters<typeof TerminalManager.makeWithOptions>[0]["serverContext"];
 }
 
 interface ManagerFixture {
@@ -285,6 +286,7 @@ const createManager = (
         logsDir,
         historyLineLimit,
         ptyAdapter,
+        ...(options.serverContext ? { serverContext: options.serverContext } : {}),
         ...(options.historyByteLimit !== undefined
           ? { historyByteLimit: options.historyByteLimit }
           : {}),
@@ -2263,6 +2265,32 @@ it.layer(
       assert.equal(spawnInput.env.CUSTOM_FLAG, "1");
       assert.equal(spawnInput.env.NO_COLOR, "1");
       assert.equal(spawnInput.env.FORCE_COLOR, "0");
+    }),
+  );
+
+  it.effect("binds terminal commands to their owning server after untrusted env overrides", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter } = yield* createManager(5, {
+        env: { T3CODE_HOME: "/wrong-inherited-home" },
+        serverContext: {
+          baseDir: "/dev/t3-home",
+          runtimeStatePath: "/dev/t3-home/userdata/server-runtime.json",
+        },
+      });
+      const input = openInput({
+        env: {
+          T3CODE_HOME: "/wrong-client-home",
+          T3CODE_SERVER_RUNTIME_PATH: "/wrong-runtime.json",
+          T3CODE_THREAD_ID: "wrong-thread",
+          t3code_home: "/wrong-case-home",
+        },
+      });
+      yield* manager.open(input);
+      const env = ptyAdapter.spawnInputs[0]?.env;
+      expect(env?.T3CODE_HOME).toBe("/dev/t3-home");
+      expect(env?.T3CODE_SERVER_RUNTIME_PATH).toBe("/dev/t3-home/userdata/server-runtime.json");
+      expect(env?.T3CODE_THREAD_ID).toBe(input.threadId);
+      expect(env?.t3code_home).toBeUndefined();
     }),
   );
 

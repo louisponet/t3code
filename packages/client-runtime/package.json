@@ -3,6 +3,14 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./helix-review": {
+      "types": "./src/helixReview.ts",
+      "default": "./src/helixReview.ts"
+    },
+    "./helix-review-control": {
+      "types": "./src/helixReviewControl.ts",
+      "default": "./src/helixReviewControl.ts"
+    },
     "./composerThreadItems": {
       "types": "./src/composerThreadItems.ts",
       "default": "./src/composerThreadItems.ts"

@@ -17,6 +17,12 @@ import { Platform, Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppText as Text } from "../../components/ui/AppText";
 import { TerminalContextSheet } from "./TerminalContextSheet";
+import { isHelixReviewTerminal } from "@t3tools/client-runtime/helix-review";
+import type { HelixReviewTarget } from "@t3tools/client-runtime/helix-review-control";
+import { HelixReviewPromptSheet, HelixReviewToolbar } from "./HelixReviewControls";
+import { useHelixReviewControls } from "./useHelixReviewControls";
+import { useHelixPrReview } from "./useHelixPrReview";
+import { HelixPrReviewSheets } from "./HelixPrReviewSheets";
 import { hasNativeTerminalSurface } from "./nativeTerminalModule";
 import * as Clipboard from "expo-clipboard";
 import * as Schema from "effect/Schema";
@@ -375,6 +381,7 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
   const firstNonEmptyBufferLoggedRef = useRef(false);
   const lastBufferReplayKeyRef = useRef<string | null>(null);
   const sentInitialInputKeyRef = useRef<string | null>(null);
+  const [confirmedInitialInputKey, setConfirmedInitialInputKey] = useState<string | null>(null);
   const [readyBufferReplayKey, setReadyBufferReplayKey] = useState<string | null>(null);
   const [hasMeasuredSurface, setHasMeasuredSurface] = useState(true);
   const [pendingModifierState, setPendingModifierState] = useState<{
@@ -716,6 +723,8 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
         terminalId,
         data: initialInput,
       },
+    }).then((result) => {
+      if (result._tag === "Success") setConfirmedInitialInputKey(launchTargetKey);
     });
   }, [
     launchTargetKey,
@@ -809,6 +818,57 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
     },
     [isRunning, selectedThread, terminalId, writeTerminal],
   );
+
+  const isHelixReview = isHelixReviewTerminal(terminalId);
+  const writeReviewAction = useCallback(
+    async (target: Omit<HelixReviewTarget, "nonce">, data: string) => {
+      if (
+        !isEnvironmentReady ||
+        !isRunning ||
+        selectedThread?.environmentId !== target.environmentId ||
+        selectedThread.id !== target.threadId ||
+        terminalId !== target.terminalId ||
+        terminal.lifecycleVersion !== target.lifecycleVersion ||
+        terminal.output.generation !== target.attachGeneration ||
+        !readEnvironmentScope(selectedThread.environmentId, AuthTerminalOperateScope)
+      )
+        return false;
+      const result = await writeTerminal({
+        environmentId: selectedThread.environmentId,
+        input: { threadId: selectedThread.id, terminalId: target.terminalId, data },
+      });
+      return result._tag === "Success";
+    },
+    [
+      isEnvironmentReady,
+      isRunning,
+      selectedThread,
+      terminalId,
+      terminal.lifecycleVersion,
+      terminal.output.generation,
+      writeTerminal,
+    ],
+  );
+  const helixReview = useHelixReviewControls({
+    environmentId: selectedThread?.environmentId ?? null,
+    threadId: selectedThread?.id ?? null,
+    terminalId,
+    lifecycleVersion: terminal.lifecycleVersion,
+    attachGeneration: terminal.output.generation,
+    attached: terminal.version > 0,
+    canDiscover:
+      (pendingLaunch === null || confirmedInitialInputKey === launchTargetKey) &&
+      terminal.hasRunningSubprocess,
+    buffer: isHelixReview ? terminal.buffer : "",
+    enabled: isHelixReview && isEnvironmentReady && isRunning && canOperateTerminal,
+    title: selectedThread?.title ?? "This thread",
+    write: writeReviewAction,
+  });
+  const helixPrReview = useHelixPrReview({
+    controls: helixReview,
+    projectId: selectedThread?.projectId ?? null,
+  });
+  const helixSheetOpen = helixReview.prompt !== null || helixPrReview.mode !== null;
 
   const pasteSessionRef = useRef<ReturnType<typeof createTerminalPasteSession> | null>(null);
   if (pasteSessionRef.current === null) {
@@ -1005,6 +1065,10 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
         environmentId: selectedThread.environmentId,
         input: { threadId: selectedThread.id, terminalId },
       });
+      if (helixSheetOpen) {
+        pendingExitNavigationRef.current = terminalKey;
+        return;
+      }
       if (navigation.isFocused()) {
         navigateAwayAfterExit();
         return;
@@ -1016,14 +1080,25 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
   useEffect(
     () =>
       navigation.addListener("focus", () => {
-        if (pendingExitNavigationRef.current !== terminalKey) {
+        if (pendingExitNavigationRef.current !== terminalKey || helixSheetOpen) {
           return;
         }
         pendingExitNavigationRef.current = null;
         navigateAwayAfterExit();
       }),
-    [navigateAwayAfterExit, navigation, terminalKey],
+    [helixSheetOpen, navigateAwayAfterExit, navigation, terminalKey],
   );
+
+  useEffect(() => {
+    if (
+      !helixSheetOpen &&
+      pendingExitNavigationRef.current === terminalKey &&
+      navigation.isFocused()
+    ) {
+      pendingExitNavigationRef.current = null;
+      navigateAwayAfterExit();
+    }
+  }, [helixSheetOpen, navigateAwayAfterExit, navigation, terminalKey]);
 
   const handleOpenNewTerminal = useCallback(() => {
     if (
@@ -1152,6 +1227,20 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
 
   return (
     <>
+      <HelixPrReviewSheets review={helixPrReview} />
+      {helixReview.prompt ? (
+        <HelixReviewPromptSheet
+          action={helixReview.prompt.action}
+          threadTitle={helixReview.prompt.title}
+          text={helixReview.prompt.text}
+          busy={helixReview.busy}
+          isCurrent={helixReview.promptIsCurrent}
+          error={helixReview.error}
+          onChangeText={helixReview.setPromptText}
+          onClose={helixReview.closePrompt}
+          onSubmit={() => void helixReview.submitPrompt()}
+        />
+      ) : null}
       {capturedOutput !== null && selectedThread ? (
         <TerminalContextSheet
           text={capturedOutput}
@@ -1263,7 +1352,7 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
                   }}
                 />
                 <TerminalSurface
-                  autoFocus={canOperateTerminal && terminalAutoFocus}
+                  autoFocus={canOperateTerminal && terminalAutoFocus && !helixSheetOpen}
                   readOnly={!canOperateTerminal}
                   buffer={terminal.version === 0 ? null : terminalSurfaceBuffer}
                   fontSize={fontSize}
@@ -1281,6 +1370,32 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
                   terminalKey={terminalKey}
                   theme={terminalTheme}
                 />
+                {isHelixReview ? (
+                  <HelixReviewToolbar
+                    ready={helixReview.ready}
+                    state={helixReview.state}
+                    reviewCount={
+                      (helixReview.prReview?.comments.length ?? 0) +
+                      (helixReview.prReview?.suggestions.filter((suggestion) => suggestion.accepted)
+                        .length ?? 0)
+                    }
+                    canDiscover={helixReview.canDiscover}
+                    onDiscover={() => void helixReview.discover()}
+                    busy={helixReview.busy || helixPrReview.busy}
+                    canRetry={helixReview.canRetry}
+                    onRetry={
+                      helixReview.retryAction?.startsWith("pr-")
+                        ? helixPrReview.retry
+                        : () => void helixReview.retry()
+                    }
+                    message={helixPrReview.error ?? helixReview.error ?? helixReview.notice}
+                    onAction={(action) => {
+                      if (action === "pr-comment") helixPrReview.open("comment");
+                      else if (action === "pr-review") helixPrReview.open("review");
+                      else helixReview.onAction(action);
+                    }}
+                  />
+                ) : null}
               </View>
 
               {Platform.OS === "android" && !keyboardState.isVisible ? (

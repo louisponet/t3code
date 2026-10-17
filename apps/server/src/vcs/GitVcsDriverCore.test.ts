@@ -2238,6 +2238,38 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
       }),
     );
 
+    it.effect("exposes the merge-base for HX when the base branch has advanced", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const baseline = yield* git(cwd, ["rev-parse", "HEAD"]);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* git(cwd, ["checkout", "-b", "feature/helix"]);
+        yield* writeTextFile(cwd, "README.md", "# test\ncommitted\n");
+        yield* git(cwd, ["commit", "-am", "feature edit"]);
+        yield* git(cwd, ["checkout", initialBranch]);
+        yield* writeTextFile(cwd, "upstream.txt", "upstream only\n");
+        yield* git(cwd, ["add", "upstream.txt"]);
+        yield* git(cwd, ["commit", "-m", "advance base"]);
+        yield* git(cwd, ["checkout", "feature/helix"]);
+        yield* writeTextFile(cwd, "README.md", "# test\ncommitted\ndirty\n");
+        yield* writeTextFile(cwd, "new.txt", "untracked\n");
+
+        const preview = yield* driver.getReviewDiffPreview({ cwd, baseRef: initialBranch });
+        const changes = preview.sources.find((source) => source.kind === "branch-range")!;
+        assert.strictEqual(changes.baseRef, initialBranch);
+        assert.strictEqual(changes.helixBaseline, baseline);
+        assert.include(changes.diff, "+committed");
+        assert.include(changes.diff, "+dirty");
+        assert.include(changes.diff, "+untracked");
+        assert.notInclude(changes.diff, "upstream.txt");
+        assert.strictEqual(
+          preview.sources.find((source) => source.kind === "working-tree")?.helixBaseline,
+          "HEAD",
+        );
+      }),
+    );
+
     it.effect("Changes on the default branch compares with its remote copy", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();
@@ -2252,6 +2284,7 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         const local = yield* driver.getReviewDiffPreview({ cwd });
         const localChanges = local.sources.find((source) => source.kind === "branch-range")!;
         assert.isNull(localChanges.baseRef);
+        assert.strictEqual(localChanges.helixBaseline, "HEAD");
         assert.deepStrictEqual(localChanges.files, []);
 
         yield* git(remote, ["init", "--bare"]);

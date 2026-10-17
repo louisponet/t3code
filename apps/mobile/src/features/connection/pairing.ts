@@ -3,6 +3,23 @@ import * as Schema from "effect/Schema";
 
 const MOBILE_PAIRING_URL_PARAM = "pairingUrl";
 
+export function resolveDevelopmentPairingLink(input: {
+  readonly isDevelopment: boolean;
+  readonly appVariant: unknown;
+  readonly pairingUrl?: string;
+  readonly autoConnect?: string;
+}) {
+  const pairingUrl =
+    input.isDevelopment || input.appVariant === "development"
+      ? (input.pairingUrl?.trim() ?? "")
+      : "";
+  return {
+    pairingUrl,
+    autoConnect:
+      pairingUrl.length > 0 && (input.autoConnect === "1" || input.autoConnect === "true"),
+  };
+}
+
 function isIpLiteral(host: string): boolean {
   try {
     const hostname = new URL(`http://${host}`).hostname.replace(/^\[|\]$/g, "");

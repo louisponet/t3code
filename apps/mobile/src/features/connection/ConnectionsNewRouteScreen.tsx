@@ -2,6 +2,7 @@ import * as Dialog from "../../components/ui/Dialog";
 import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
 import { useAuth } from "@clerk/expo";
 import { CameraView, useCameraPermissions } from "expo-camera";
+import Constants from "expo-constants";
 import * as Haptics from "expo-haptics";
 import {
   StackActions,
@@ -22,7 +23,12 @@ import { useAppearancePreferences } from "../settings/appearance/AppearancePrefe
 import { SettingsScreen } from "../settings/components/SettingsScreen";
 import { AppText as Text, AppTextInput, type AppTextInputProps } from "../../components/ui/AppText";
 import { FrostedCutout } from "../../components/ui/FrostedCutout";
-import { buildPairingUrl, extractPairingUrlFromQrPayload, parsePairingUrl } from "./pairing";
+import {
+  buildPairingUrl,
+  extractPairingUrlFromQrPayload,
+  parsePairingUrl,
+  resolveDevelopmentPairingLink,
+} from "./pairing";
 import {
   setPendingConnectionError,
   useRemoteConnections,
@@ -51,13 +57,15 @@ export function ConnectionsNewRouteScreen({
   const navigation = useNavigation();
   const routeName = useRoute().name;
   const params = route.params ?? {};
-  // Deep-link prefill exists for development automation only. A production
+  // Standalone development builds support pairing links without Metro. A production
   // link must not arrive with attacker-chosen host and token already filled.
-  const routePairingUrl = __DEV__ ? (params.pairingUrl?.trim() ?? "") : "";
-  const shouldAutoConnect =
-    __DEV__ &&
-    routePairingUrl.length > 0 &&
-    (params.autoConnect === "1" || params.autoConnect === "true");
+  const { pairingUrl: routePairingUrl, autoConnect: shouldAutoConnect } =
+    resolveDevelopmentPairingLink({
+      isDevelopment: __DEV__,
+      appVariant: Constants.expoConfig?.extra?.appVariant,
+      pairingUrl: params.pairingUrl,
+      autoConnect: params.autoConnect,
+    });
   const insets = useSafeAreaInsets();
   const [hostInput, setHostInput] = useState("");
   const [codeInput, setCodeInput] = useState("");

@@ -217,6 +217,8 @@ export function useReviewSections(input: {
     diffPreviewRevision: diffPreview.data
       ? DateTime.formatIso(diffPreview.data.generatedAt)
       : undefined,
+    helixComparison:
+      selectedSection?.kind === "turn" ? activeTurnDiff.data?.helixComparison : undefined,
     loadingTurnIds,
     reviewSections,
     selectedSection,

@@ -381,6 +381,7 @@ export interface GitHubPullRequestSearchBatch {
 
 export interface GitHubPullRequestDiffSlice {
   readonly patch: string;
+  readonly helixComparison?: { readonly baseline: string; readonly revision: string };
   /** Files in this slice had their hunks withheld, as opposed to there being more slices. */
   readonly truncated: boolean;
   readonly nextCursor: string | null;
@@ -642,6 +643,7 @@ export class GitHubPullRequestApi extends Context.Service<
     }) => Effect.Effect<void, GitHubPullRequestApiError>;
 
     readonly submitReview: (input: {
+      readonly expectedHeadSha?: string;
       readonly cwd: string;
       readonly repository: string;
       readonly host: string;
@@ -1183,12 +1185,27 @@ export const make = Effect.gen(function* () {
               ),
             );
           }
+          const refs =
+            input.commit === undefined ? Option.none() : decodeRevisionRefs(response.body);
+          const revision = Option.isSome(refs) ? refs.value.sha : undefined;
+          const baseline = Option.isSome(refs)
+            ? refs.value.parents?.length === 0
+              ? "4b825dc642cb6eb9a060e54bf8d69288fbee4904" // GitHub root commits compare with the empty tree.
+              : refs.value.parents?.[0]?.sha
+            : undefined;
+          const helixComparison =
+            revision !== undefined &&
+            baseline !== undefined &&
+            isCommitSha(revision) &&
+            isCommitSha(baseline)
+              ? { baseline, revision }
+              : undefined;
           return decodeWith(
             input.cwd,
             "getPullRequestDiff",
             input.commit === undefined ? decodePullRequestFilesJson : decodeCommitFilesJson,
             response.body,
-          );
+          ).pipe(Effect.map((files) => ({ ...files, helixComparison })));
         }),
         Effect.map((files) => {
           // Counted before decoding, so a page whose files all failed to decode still moves on
@@ -1196,6 +1213,7 @@ export const make = Effect.gen(function* () {
           const morePages = files.rawCount >= DIFF_FILES_PAGE_SIZE;
           return {
             patch: files.patch,
+            ...(files.helixComparison ? { helixComparison: files.helixComparison } : {}),
             truncated: files.truncated,
             nextCursor: morePages ? String(input.page + 1) : null,
             ...(files.omittedFileStats.length === 0
@@ -2522,6 +2540,9 @@ export const make = Effect.gen(function* () {
           method: "POST",
           path: `repos/${owner}/${name}/pulls/${input.number}/reviews`,
           body: buildReviewSubmission({
+            ...(input.expectedHeadSha === undefined
+              ? {}
+              : { expectedHeadSha: input.expectedHeadSha }),
             verdict: input.verdict,
             body: input.body,
             comments: input.comments,

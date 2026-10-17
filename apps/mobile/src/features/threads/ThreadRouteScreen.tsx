@@ -63,6 +63,7 @@ import {
   stagePendingTerminalLaunch,
 } from "../terminal/terminalLaunchContext";
 import { terminalDebugLog } from "../terminal/terminalDebugLog";
+import { useOpenInHelix } from "../terminal/useOpenInHelix";
 import { ThreadDetailScreen, type ThreadDetailScreenProps } from "./ThreadDetailScreen";
 import { GitOverviewSheet } from "./git/GitOverviewSheet";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -766,6 +767,11 @@ function ThreadRouteContent(
       knownTerminalSessions,
     ],
   );
+  const helixEditor = useOpenInHelix(environmentId ?? null, threadId ?? null);
+  const canReviewInHelix = helixEditor.available;
+  const handleReviewInHelix = useCallback(() => {
+    helixEditor.open();
+  }, [helixEditor]);
   const threadGitControlProps = {
     environmentId: environmentIdRaw ?? "",
     threadId: threadId ?? "",
@@ -801,6 +807,7 @@ function ThreadRouteContent(
     onOpenTerminal: handleOpenTerminal,
     onOpenNewTerminal: handleOpenNewTerminal,
     onRunProjectScript: handleRunProjectScript,
+    onReviewInHelix: canReviewInHelix ? handleReviewInHelix : undefined,
     onPull: gitActions.onPullSelectedThreadBranch,
     onRunAction: gitActions.onRunSelectedThreadGitAction,
   };

@@ -301,6 +301,7 @@ export function isSubjectOfPullRequest(result: PullRequestSubject.Result): boole
 
 /** The body of `POST /repos/{owner}/{repo}/pulls/{number}/reviews`, which sends a review whole. */
 const ReviewSubmissionSchema = Schema.Struct({
+  commit_id: Schema.optional(Schema.String),
   event: Schema.Literals(["COMMENT", "APPROVE", "REQUEST_CHANGES"]),
   body: Schema.String,
   comments: Schema.Array(
@@ -308,6 +309,8 @@ const ReviewSubmissionSchema = Schema.Struct({
       path: Schema.String,
       line: Schema.Int,
       side: Schema.Literals(["LEFT", "RIGHT"]),
+      start_line: Schema.optional(Schema.Int),
+      start_side: Schema.optional(Schema.Literals(["LEFT", "RIGHT"])),
       body: Schema.String,
     }),
   ),
@@ -336,18 +339,26 @@ function gitHubReviewPosition(position: PullRequestReviewPosition): {
 }
 
 export function buildReviewSubmission(input: {
+  readonly expectedHeadSha?: string;
   readonly verdict: PullRequestReviewVerdict;
   readonly body: string;
   readonly comments: ReadonlyArray<PullRequestReviewCommentDraft>;
 }): typeof ReviewSubmissionSchema.Type {
   return {
+    ...(input.expectedHeadSha === undefined ? {} : { commit_id: input.expectedHeadSha }),
     event: REVIEW_EVENTS[input.verdict],
     body: input.body,
-    comments: input.comments.map((comment) => ({
-      path: comment.path,
-      ...gitHubReviewPosition(comment.position),
-      body: comment.body,
-    })),
+    comments: input.comments.map((comment) => {
+      const position = gitHubReviewPosition(comment.position);
+      return {
+        path: comment.path,
+        ...position,
+        ...(comment.startLine === undefined || comment.startLine === position.line
+          ? {}
+          : { start_line: comment.startLine, start_side: position.side }),
+        body: comment.body,
+      };
+    }),
   };
 }
 

@@ -10,6 +10,67 @@ rebases, the files Git brought in are left out. A file stays in the list when th
 committed it, or fixed a conflict in it. Use the branch comparison to review everything that changed
 against your base branch. Restore still returns the complete saved workspace.
 
+## Edit and review in Helix
+
+Helix is the internal code editor on web, desktop, Android, and iOS. Open a source
+file from **Files**, a path link, or search to edit it in HX. File links retain
+their line location. Opening changes uses the same editor for that thread and
+worktree, so switching files preserves open buffers and unsaved edits. Images,
+audio, video, and documents keep their previews; markdown, HTML, and tables can
+also use your preferred rendered view. Chat code snippets stay inline.
+
+Install a review-enabled Helix build and the `hx-t3` launcher on the machine
+running your T3 environment, then run `hx-t3 setup`. Linux and macOS environments
+are supported. Remote environments run HX on their server, so install and pair
+it there. Missing setup or an outdated integration appears in the code pane.
+The thread header, workspace details, and command palette also provide a direct
+way to open Helix.
+
+Files in folders without Git or before the first commit still open for editing.
+Review comparisons and agent feedback become available after the first Git commit.
+
+Select a comparison from the thread's changes to review it in HX. Historical
+turn reviews show the exact saved revisions and are read-only; branch comparisons
+use the resolved merge base and include current edits. **Uncommitted** compares
+current edits with `HEAD`. Older servers need an update before opening saved
+comparisons in Helix.
+
+The editor provides **Files**, **Previous**, **Next**, **Ask**, **Stage**, and
+reviewed-mark controls. **Comment** saves feedback about selected code for the
+thread's agent. **Send** (or **Send to agent** on mobile) hands back saved comments
+and edits; **Undo comment** removes the last saved comment. Saving alone does
+not send a message. Save corrections before sending; replies appear in the same
+T3 thread. In HX, `Space A a` asks about the selection and
+`:review-send [instruction]` sends the handoff.
+
+In live pull request reviews, **Mark reviewed** marks the current change and
+advances to the next unreviewed change. **Unmark reviewed** clears its mark.
+Marks stay in the HX session and reset when the change's content changes.
+**Stage** is available for uncommitted changes. Saved historical comparisons
+cannot be staged or sent as live edits.
+
+Open a pull request's **Code** view or a changed file to review it in Helix.
+On web and desktop, **Prepare Helix review** prepares an isolated worktree and
+opens the editor. On mobile, opening a changed file prepares its worktree.
+Reading the PR does not require sending an agent message, and preparation leaves
+your current checkout in place. A stale checkout must be updated before review.
+Selecting a PR commit opens its exact saved comparison.
+
+For GitHub PRs, **PR review** provides line-comment drafts, saved-edit suggestions,
+and a preview before submission. On mobile, **PR comment** opens a draft for the
+HX selection. Choose **Comment**, **Approve**, or **Request changes**, add a
+summary, and explicitly submit. Drafts stay private in HX until submission.
+Reviews are pinned to the PR head; changed content requires a fresh preview.
+Reviewed marks do not submit comments or accept edits. Excluding a suggestion
+leaves the saved edit in the checkout. If submission cannot be confirmed, check
+the pull request before posting again.
+
+Submit drafts before quitting HX. Reopening a file or review reconnects to the
+running editor; after HX exits, reopen it to start a fresh editor. In an existing
+thread terminal, `hx-t3 --pr <PR URL>` opens an attached PR review. For work already
+committed before the first review, choose an earlier baseline with `Space A b`,
+or launch `hx-t3 --base <revision>`.
+
 ## Connect an account
 
 Install Git and configure authentication on the machine running your T3 Code server. For a remote
@@ -158,9 +219,9 @@ to read its description, activity, commits, and changed files. Line comments sta
 until you submit the review. **Work on PR** opens a chat with the review attached; sending
 the first message prepares a worktree from the review's branch.
 
-Previously loaded lists, review details, guides, and diff pages remain readable on mobile
+Previously loaded lists, review details, and guides remain readable on mobile
 without a connection, including after restarting the app. Saved content refreshes when the
-environment reconnects; submitting changes requires a connection.
+environment reconnects; opening source files and diffs in Helix or submitting changes requires a connection.
 
 Enable **Remove agent credits when merging** in Settings → Source Control to remove recognized
 agent co-author and generated-by lines from GitHub merge and squash commit messages. Human
@@ -239,8 +300,8 @@ in either direction. Forgejo, GitLab, Bitbucket, and Azure DevOps expose no reco
 server you are connected to keeps them instead: they follow you across the apps connected to that
 server, but the host's own site will not show them, and the count reads **viewed in T3 Code**.
 
-On mobile, open a changed file and mark it viewed from its header. Viewed files collapse,
-and their marks follow the same rules as on web and desktop.
+On mobile, mark files viewed from the changed files list. Their marks follow the
+same rules as on web and desktop.
 
 ## Troubleshooting
 

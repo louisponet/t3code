@@ -1857,6 +1857,84 @@ describe("reviewer request payload", () => {
 });
 
 describe("review submission payload", () => {
+  it("pins multiline comments and suggestions to the reviewed commit on either side", () => {
+    const suggestion = "Keep this name.\n\n```suggestion\nconst value = 1;\nconst next = 2;\n```";
+    expect(
+      buildReviewSubmission({
+        expectedHeadSha: "frozen-head",
+        verdict: "comment",
+        body: "Review",
+        comments: [
+          {
+            path: "src/a.ts",
+            position: { kind: "added", newLine: 12 },
+            startLine: 10,
+            body: suggestion,
+          },
+          {
+            path: "src/b.ts",
+            position: { kind: "context", oldLine: 7, newLine: 9, side: "left" },
+            startLine: 5,
+            body: "Keep these lines",
+          },
+          {
+            path: "src/c.ts",
+            position: { kind: "context", oldLine: 8, newLine: 11, side: "right" },
+            startLine: 9,
+            body: "Check this range",
+          },
+        ],
+      }),
+    ).toEqual({
+      commit_id: "frozen-head",
+      event: "COMMENT",
+      body: "Review",
+      comments: [
+        {
+          path: "src/a.ts",
+          line: 12,
+          side: "RIGHT",
+          start_line: 10,
+          start_side: "RIGHT",
+          body: suggestion,
+        },
+        {
+          path: "src/b.ts",
+          line: 7,
+          side: "LEFT",
+          start_line: 5,
+          start_side: "LEFT",
+          body: "Keep these lines",
+        },
+        {
+          path: "src/c.ts",
+          line: 11,
+          side: "RIGHT",
+          start_line: 9,
+          start_side: "RIGHT",
+          body: "Check this range",
+        },
+      ],
+    });
+  });
+
+  it("omits range fields when the first and last lines are the same", () => {
+    expect(
+      buildReviewSubmission({
+        verdict: "comment",
+        body: "",
+        comments: [
+          {
+            path: "src/a.ts",
+            position: { kind: "deleted", oldLine: 3 },
+            startLine: 3,
+            body: "Keep this",
+          },
+        ],
+      }).comments,
+    ).toEqual([{ path: "src/a.ts", line: 3, side: "LEFT", body: "Keep this" }]);
+  });
+
   it("sends the verdict, the summary and every line comment in one body", () => {
     const payload = buildReviewSubmission({
       verdict: "request-changes",

@@ -72,6 +72,7 @@ function compactMenuStatus(gitStatus: VcsStatusResult | null): string {
 type HeaderItem = Record<string, unknown>;
 type HeaderItems = HeaderItem[];
 type ThreadGitHeaderActionItems = {
+  readonly helix: HeaderItem;
   readonly terminal: HeaderItem;
   readonly files: HeaderItem;
   readonly git: HeaderItem;
@@ -110,6 +111,7 @@ type ThreadGitControlsProps = ThreadGitMenuProps & {
   readonly onOpenTerminal: (terminalId?: string | null) => void;
   readonly onOpenNewTerminal: () => void;
   readonly onRunProjectScript: (script: ProjectScript) => Promise<void>;
+  readonly onReviewInHelix?: () => void;
 };
 
 function useThreadGitControlModel(props: ThreadGitMenuProps) {
@@ -278,6 +280,17 @@ function useThreadGitHeaderActionItems(props: ThreadGitControlsProps): ThreadGit
 
   return useMemo(
     () => ({
+      helix: {
+        accessibilityLabel: "Open Helix editor",
+        disabled: !props.onReviewInHelix,
+        icon: { name: "chevron.left.forwardslash.chevron.right", type: "sfSymbol" },
+        identifier: "thread-right-helix",
+        label: "Helix",
+        onPress: props.onReviewInHelix,
+        sharesBackground: true,
+        type: "button",
+        variant: "plain",
+      },
       terminal: {
         accessibilityLabel: "Open terminal",
         disabled: !props.canOpenTerminal,
@@ -286,6 +299,16 @@ function useThreadGitHeaderActionItems(props: ThreadGitControlsProps): ThreadGit
         label: "Terminal",
         menu: {
           items: [
+            ...(props.onReviewInHelix
+              ? [
+                  {
+                    label: "Review in HX",
+                    icon: { name: "text.bubble", type: "sfSymbol" as const },
+                    onPress: props.onReviewInHelix,
+                    type: "action" as const,
+                  },
+                ]
+              : []),
             ...props.projectScripts.map((script) => ({
               description: script.command,
               disabled: !props.canOperateTerminal,
@@ -426,6 +449,7 @@ function useThreadGitHeaderActionItems(props: ThreadGitControlsProps): ThreadGit
       props.onOpenNewTerminal,
       props.onOpenTerminal,
       props.onRunProjectScript,
+      props.onReviewInHelix,
       props.projectScripts,
       props.terminalSessions,
     ],
@@ -435,7 +459,8 @@ function useThreadGitHeaderActionItems(props: ThreadGitControlsProps): ThreadGit
 export function useThreadGitRightHeaderItems(props: ThreadGitControlsProps): HeaderItems {
   const actionItems = useThreadGitHeaderActionItems(props);
   return useMemo(
-    () => [actionItems.git, actionItems.files, actionItems.terminal] as HeaderItems,
+    () =>
+      [actionItems.helix, actionItems.git, actionItems.files, actionItems.terminal] as HeaderItems,
     [actionItems],
   );
 }
@@ -443,7 +468,8 @@ export function useThreadGitRightHeaderItems(props: ThreadGitControlsProps): Hea
 export function useThreadGitCenterHeaderItems(props: ThreadGitControlsProps): HeaderItems {
   const actionItems = useThreadGitHeaderActionItems(props);
   return useMemo(
-    () => [actionItems.files, actionItems.git, actionItems.terminal] as HeaderItems,
+    () =>
+      [actionItems.helix, actionItems.files, actionItems.git, actionItems.terminal] as HeaderItems,
     [actionItems],
   );
 }
@@ -458,6 +484,14 @@ export function ThreadGitControls(props: ThreadGitControlsProps) {
 
   return (
     <Toolbar placement="right">
+      {props.onReviewInHelix ? (
+        <Toolbar.Button
+          accessibilityLabel="Open Helix editor"
+          icon="chevron.left.forwardslash.chevron.right"
+          onPress={props.onReviewInHelix}
+          separateBackground
+        />
+      ) : null}
       {showActionControls && props.auxiliaryPaneControl ? (
         <Toolbar.Button
           accessibilityLabel={props.auxiliaryPaneControl.accessibilityLabel}
@@ -473,6 +507,11 @@ export function ThreadGitControls(props: ThreadGitControlsProps) {
           disabled={!props.canOpenTerminal}
           separateBackground
         >
+          {props.onReviewInHelix ? (
+            <Toolbar.MenuAction icon="text.bubble" onPress={props.onReviewInHelix}>
+              <Toolbar.Label>Review in HX</Toolbar.Label>
+            </Toolbar.MenuAction>
+          ) : null}
           {props.projectScripts.length > 0 ? (
             props.projectScripts.map((script) => (
               <Toolbar.MenuAction

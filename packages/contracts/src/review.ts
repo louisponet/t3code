@@ -34,6 +34,8 @@ export const ReviewDiffPreviewSource = Schema.Struct({
   title: TrimmedNonEmptyString,
   baseRef: Schema.NullOr(TrimmedNonEmptyString),
   headRef: Schema.NullOr(TrimmedNonEmptyString),
+  // Display refs can diverge; HX needs the resolved baseline used against the working tree.
+  helixBaseline: Schema.optionalKey(TrimmedNonEmptyString),
   diff: Schema.String,
   diffHash: TrimmedNonEmptyString,
   truncated: Schema.Boolean,

@@ -217,7 +217,18 @@ export const make = Effect.gen(function* () {
               { concurrency: 4 },
             )).join("");
 
-      const turnDiff = buildTurnDiffResult(input, diff);
+      const turnDiff = {
+        ...buildTurnDiffResult(input, diff),
+        helixComparison: {
+          cwd: comparison.cwd,
+          baseline: comparison.fromCheckpointRef,
+          revision: comparison.toCheckpointRef,
+          ignoreWhitespace,
+          ...(retainedFiles.length === files.length
+            ? {}
+            : { filePaths: batchFilePaths(retainedFiles).flat() }),
+        },
+      };
       if (!isTurnDiffResult(turnDiff)) {
         return yield* new CheckpointDiffResultInvalidError({
           operation,

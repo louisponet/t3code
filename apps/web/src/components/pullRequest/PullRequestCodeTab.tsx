@@ -231,6 +231,7 @@ export default function PullRequestCodeTab({
         worktreePath={review.cwd}
         keybindings={keybindings}
         options={{
+          mode: "review",
           worktreePath: review.cwd,
           ...(selectedCommitOid
             ? {

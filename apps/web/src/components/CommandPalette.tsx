@@ -1848,7 +1848,7 @@ function OpenCommandPaletteDialog(props: {
     actionItems.push({
       kind: "action",
       value: "review-in-helix",
-      title: "Review in HX",
+      title: "Work together in HX",
       searchTerms: ["helix", "hx", "review", "diff", "comments"],
       icon: <FileSearchIcon className={ITEM_ICON_CLASS} />,
       run: async () => {

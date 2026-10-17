@@ -703,6 +703,24 @@ describe("HX review action controller", () => {
 });
 
 describe("Helix file navigation and ordinary feedback", () => {
+  it("preserves the authoritative mode while accepting legacy states and rejecting unknown modes", () => {
+    const legacy = resolveHelixReviewState(parseHelixReviewMarkers(marker(STATE)), NONCE);
+    expect(legacy?.mode ?? "work").toBe("work");
+    expect(
+      resolveHelixReviewState(parseHelixReviewMarkers(marker({ ...STATE, mode: null })), NONCE),
+    ).toEqual(legacy);
+    const work = resolveHelixReviewState(
+      parseHelixReviewMarkers(marker({ ...STATE, mode: "work" })),
+      NONCE,
+      legacy,
+    );
+    const reviewMarkers = parseHelixReviewMarkers(marker({ ...STATE, mode: "review" }));
+    const review = resolveHelixReviewState(reviewMarkers, NONCE, work);
+    expect(review?.mode).toBe("review");
+    expect(review).not.toBe(work);
+    expect(resolveHelixReviewState(reviewMarkers, NONCE, review)).toBe(review);
+    expect(parseHelixReviewMarkers(marker({ ...STATE, mode: "unknown" }))).toEqual([]);
+  });
   it("carries file locations and pending comments through the guarded protocol", () => {
     const options = JSON.stringify({ filePath: "src/a 'quoted'.ts", line: 17 });
     expect(encodeHelixReviewAction(NONCE, ID, "open-file", options)).not.toContain(options);
@@ -710,8 +728,6 @@ describe("Helix file navigation and ordinary feedback", () => {
     expect(() => encodeHelixReviewAction(NONCE, ID, "comment", "Keep this pending")).not.toThrow();
   });
   it("reads capabilities and rejects invalid pending counts", () => {
-    const marker = (state: unknown) =>
-      `\x1b]777;hx-review;${NONCE};${Buffer.from(JSON.stringify(state)).toString("hex")}\x07`;
     const payload = {
       ...STATE,
       canOpenFile: true,

@@ -22,6 +22,7 @@ import type { HelixReviewTarget } from "@t3tools/client-runtime/helix-review-con
 import { HelixReviewPromptSheet, HelixReviewToolbar } from "./HelixReviewControls";
 import { useHelixReviewControls } from "./useHelixReviewControls";
 import { useHelixPrReview } from "./useHelixPrReview";
+import { useOpenInHelix } from "./useOpenInHelix";
 import { HelixPrReviewSheets } from "./HelixPrReviewSheets";
 import { hasNativeTerminalSurface } from "./nativeTerminalModule";
 import * as Clipboard from "expo-clipboard";
@@ -869,6 +870,10 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
     projectId: selectedThread?.projectId ?? null,
   });
   const helixSheetOpen = helixReview.prompt !== null || helixPrReview.mode !== null;
+  const helixEditor = useOpenInHelix(
+    selectedThread?.environmentId ?? null,
+    selectedThread?.id ?? null,
+  );
 
   const pasteSessionRef = useRef<ReturnType<typeof createTerminalPasteSession> | null>(null);
   if (pasteSessionRef.current === null) {
@@ -1231,6 +1236,7 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
       {helixReview.prompt ? (
         <HelixReviewPromptSheet
           action={helixReview.prompt.action}
+          mode={helixReview.prompt.mode}
           threadTitle={helixReview.prompt.title}
           text={helixReview.prompt.text}
           busy={helixReview.busy}
@@ -1374,6 +1380,20 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
                   <HelixReviewToolbar
                     ready={helixReview.ready}
                     state={helixReview.state}
+                    onSwitchMode={
+                      helixEditor.available &&
+                      (helixReview.state?.mode === "review" ||
+                        selectedThread?.linkedPullRequest ||
+                        selectedThread?.pullRequests?.some(
+                          (link) => link.source !== "stack-dismissed",
+                        ))
+                        ? () =>
+                            helixEditor.open({
+                              mode: helixReview.state?.mode === "review" ? "work" : "review",
+                              ...(cwd ? { worktreePath: cwd } : {}),
+                            })
+                        : undefined
+                    }
                     reviewCount={
                       (helixReview.prReview?.comments.length ?? 0) +
                       (helixReview.prReview?.suggestions.filter((suggestion) => suggestion.accepted)

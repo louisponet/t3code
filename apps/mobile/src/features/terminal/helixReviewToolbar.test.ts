@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { helixReviewToolbar } from "./helixReviewToolbar";
 
 const state: HelixReviewState = {
+  mode: "review",
   nonce: "22222222-2222-4222-8222-222222222222",
   canStage: false,
   canMarkReviewed: true,
@@ -12,6 +13,41 @@ const state: HelixReviewState = {
 };
 
 describe("HX review toolbar", () => {
+  it("shows only the current mode's destination even when every capability is available", () => {
+    const capabilities = {
+      ...state,
+      canStage: true,
+      canComment: true,
+      canSend: true,
+      canReviewPr: true,
+      pendingCommentCount: 2,
+    };
+    const work = helixReviewToolbar({ ...capabilities, mode: "work" }).actions.map(
+      ({ action }) => action,
+    );
+    expect(work).toEqual([
+      "comment",
+      "files",
+      "previous",
+      "next",
+      "ask",
+      "stage",
+      "discard-last-comment",
+      "send",
+    ]);
+    const review = helixReviewToolbar({ ...capabilities, mode: "review" }).actions.map(
+      ({ action }) => action,
+    );
+    expect(review).toEqual([
+      "files",
+      "previous",
+      "next",
+      "ask",
+      "mark-reviewed",
+      "pr-comment",
+      "pr-review",
+    ]);
+  });
   it("keeps Stage for legacy editors and uncommitted changes", () => {
     const legacy = helixReviewToolbar(null);
     expect(legacy.actions.map(({ action }) => action)).toEqual([
@@ -25,6 +61,7 @@ describe("HX review toolbar", () => {
     expect(legacy.progress).toBeNull();
     const uncommitted = helixReviewToolbar({
       ...state,
+      mode: "work",
       canStage: true,
       canMarkReviewed: false,
       reviewed: null,
@@ -63,7 +100,6 @@ describe("HX review toolbar", () => {
       "previous",
       "next",
       "ask",
-      "send",
     ]);
     expect(outsideChange.progress).toBe("1/3 changes reviewed in this file");
   });
@@ -73,13 +109,18 @@ describe("HX review toolbar", () => {
       "pr-comment",
     );
     const pr = helixReviewToolbar({ ...state, canReviewPr: true }, 3);
-    expect(pr.actions.find(({ action }) => action === "pr-comment")?.label).toBe("PR comment");
-    expect(pr.actions.find(({ action }) => action === "pr-review")?.label).toBe("PR review · 3");
-    expect(pr.actions.find(({ action }) => action === "ask")?.label).toBe("Ask");
+    expect(pr.actions.find(({ action }) => action === "pr-comment")?.label).toBe(
+      "Draft PR comment",
+    );
+    expect(pr.actions.find(({ action }) => action === "pr-review")?.label).toBe(
+      "Review drafts · 3",
+    );
+    expect(pr.actions.find(({ action }) => action === "ask")?.label).toBe("Ask agent");
   });
   it("keeps agent comments available outside PRs and disables snapshot questions", () => {
     const actions = helixReviewToolbar({
       ...state,
+      mode: "work",
       canComment: true,
       pendingCommentCount: 2,
       canAsk: false,
@@ -95,6 +136,10 @@ describe("HX review toolbar", () => {
         ({ action }) => action === "send",
       ),
     ).toBe(false);
-    expect(helixReviewToolbar(state).actions.some(({ action }) => action === "send")).toBe(true);
+    expect(
+      helixReviewToolbar({ ...state, mode: "work" }).actions.some(
+        ({ action }) => action === "send",
+      ),
+    ).toBe(true);
   });
 });

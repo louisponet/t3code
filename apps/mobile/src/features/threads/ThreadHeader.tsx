@@ -96,7 +96,7 @@ export function ThreadHeader(
               items: [
                 {
                   id: "helix-review",
-                  title: "Review in HX",
+                  title: "Work together in HX",
                   icon: "text.bubble",
                   onPress: props.gitControls.onReviewInHelix,
                 },

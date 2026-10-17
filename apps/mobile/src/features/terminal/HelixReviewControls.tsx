@@ -2,6 +2,7 @@ import type {
   HelixReviewAction,
   HelixReviewState,
 } from "@t3tools/client-runtime/helix-review-control";
+import type { HelixMode } from "@t3tools/client-runtime/helix-review";
 import { Platform, ScrollView, View } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -26,13 +27,32 @@ export function HelixReviewToolbar(props: {
   onRetry: () => void;
   message: string | null;
   onAction: (action: HelixReviewAction) => void;
+  onSwitchMode?: (() => void) | undefined;
 }) {
-  const { actions, progress } = helixReviewToolbar(
+  const { actions: stateActions, progress } = helixReviewToolbar(
     props.ready ? props.state : null,
     props.reviewCount,
   );
+  const actions = props.ready ? stateActions : [];
   return (
     <View className="border-t border-border bg-card-alt">
+      <View className="flex-row items-center justify-between px-4 py-1">
+        <Text className="text-sm font-t3-bold">
+          {props.state
+            ? props.state.mode === "review"
+              ? "Review a PR"
+              : "Work together"
+            : "Connecting to HX…"}
+        </Text>
+        {props.onSwitchMode ? (
+          <Button
+            label={props.state?.mode === "review" ? "Work together" : "Review a PR"}
+            tone="text"
+            disabled={!props.ready || props.busy || props.canRetry}
+            onPress={props.onSwitchMode}
+          />
+        ) : null}
+      </View>
       <ComposerToolbarRow paddingBottom={4} paddingHorizontal={8} paddingTop={4}>
         {actions
           .filter(({ action }) => action === "comment" || action === "pr-comment")
@@ -65,6 +85,13 @@ export function HelixReviewToolbar(props: {
             ))}
         </ComposerToolbarScroller>
       </ComposerToolbarRow>
+      {props.state?.mode === "review" ? (
+        <Text className="px-4 pb-2 text-xs text-foreground-muted">
+          {props.state.canReviewPr
+            ? "Edit selected code in HX to draft a suggestion. Submit review publishes your drafts to GitHub."
+            : "Historical comparisons are read-only. Open a current PR file to draft comments and suggestions."}
+        </Text>
+      ) : null}
       {progress ? (
         <Text className="px-4 pb-2 text-sm text-foreground-muted" accessibilityLiveRegion="polite">
           {progress}
@@ -73,7 +100,7 @@ export function HelixReviewToolbar(props: {
       {props.message || !props.ready ? (
         <Text className="px-4 pb-2 text-sm text-foreground-muted" accessibilityLiveRegion="polite">
           {props.message ??
-            "Waiting for HX. Open Review in HX from the thread’s Terminal menu if it has closed."}
+            "Waiting for HX. Open Work together in HX from the thread’s Terminal menu if it has closed."}
         </Text>
       ) : null}
       {!props.ready && props.canDiscover ? (
@@ -93,6 +120,7 @@ export function HelixReviewToolbar(props: {
 
 export function HelixReviewPromptSheet(props: {
   action: "ask" | "send" | "comment";
+  mode?: HelixMode | undefined;
   threadTitle: string;
   text: string;
   busy: boolean;
@@ -107,7 +135,15 @@ export function HelixReviewPromptSheet(props: {
   const commenting = props.action === "comment";
   return (
     <Sheet
-      title={asking ? "Ask about selection" : commenting ? "Comment for agent" : "Send to agent"}
+      title={
+        asking
+          ? props.mode === "review"
+            ? "Ask your co-reviewer"
+            : "Ask agent about selection"
+          : commenting
+            ? "Comment for agent"
+            : "Send to agent"
+      }
       onClose={props.onClose}
     >
       <KeyboardAvoidingView automaticOffset behavior="padding" style={{ flex: 1 }}>
@@ -120,7 +156,9 @@ export function HelixReviewPromptSheet(props: {
           <Text className="pb-2 text-sm text-foreground-muted">{props.threadTitle}</Text>
           <Text className="pb-4 text-sm text-foreground-muted">
             {asking
-              ? "Your question includes the selection in HX, including old diff text."
+              ? props.mode === "review"
+                ? "Discuss this PR with the agent. Your question includes the selected code and does not publish review drafts."
+                : "Your question includes the selection in HX, including old diff text."
               : commenting
                 ? "Save feedback on the selection in HX. Send to agent submits your saved comments."
                 : "Send pending feedback and saved edits to the agent. Add a note if you like."}

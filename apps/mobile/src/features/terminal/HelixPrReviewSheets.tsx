@@ -214,7 +214,7 @@ export function HelixPrReviewSheets(props: { review: ReturnType<typeof useHelixP
                         onPress={form.backToDrafts}
                       />
                       <Button
-                        label={form.busy ? "Submitting…" : "Submit review"}
+                        label={form.busy ? "Submitting…" : "Submit review to GitHub"}
                         tone="primary"
                         disabled={!form.canPreview}
                         onPress={form.submit}

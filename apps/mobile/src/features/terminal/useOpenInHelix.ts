@@ -39,6 +39,7 @@ export function useOpenInHelix(environmentId: string | null, threadId: string | 
   );
   const open = useCallback(
     (options: HelixOpenOptions = {}) => {
+      options = { ...options, mode: options.mode ?? "work" };
       if (
         !available ||
         !selectedThread ||

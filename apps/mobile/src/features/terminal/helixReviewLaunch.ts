@@ -21,6 +21,7 @@ export function prepareHelixReviewLaunch(input: {
   readonly uniqueSuffix: string;
   readonly options?: HelixOpenOptions;
 }) {
+  const mode = input.options?.mode ?? "work";
   const worktreePath = input.options?.worktreePath ?? resolvePreferredThreadWorktreePath(input);
   const cwd = worktreePath ?? input.workspaceRoot;
   const existingTerminalId = findOpenHelixReviewTerminal(
@@ -29,12 +30,14 @@ export function prepareHelixReviewLaunch(input: {
         target.environmentId === input.threadRef.environmentId &&
         target.threadId === input.threadRef.threadId &&
         state.summary?.cwd === cwd &&
-        (state.summary.worktreePath ?? null) === worktreePath,
+        (state.summary.worktreePath ?? state.summary.cwd) === (worktreePath ?? cwd),
     ),
+    undefined,
+    mode,
   );
   const target = {
     ...input.threadRef,
-    terminalId: existingTerminalId ?? newHelixReviewTerminalId(input.uniqueSuffix),
+    terminalId: existingTerminalId ?? newHelixReviewTerminalId(input.uniqueSuffix, mode),
   };
   if (existingTerminalId !== null) return { target, launch: null };
 
@@ -60,6 +63,7 @@ export function createHelixLaunchCoordinator(now = Date.now) {
       input.threadRef.environmentId,
       input.threadRef.threadId,
       worktreePath ?? input.workspaceRoot,
+      input.options?.mode ?? "work",
     ]);
     const time = now();
     for (const [key, reservation] of pending) if (reservation.expires <= time) pending.delete(key);

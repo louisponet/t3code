@@ -1,5 +1,6 @@
 // @effect-diagnostics globalTimers:off - This client controller waits for terminal acknowledgments outside an Effect runtime.
 import { isHelixPrReviewPayload, type HelixPrReviewPayload } from "./helixPrReview.ts";
+import type { HelixMode } from "./helixReview.ts";
 export type {
   HelixPrReviewPayload,
   HelixPrReviewSnapshot,
@@ -27,6 +28,7 @@ export type HelixReviewAction =
 
 export interface HelixReviewState {
   readonly nonce: string;
+  readonly mode?: HelixMode;
   readonly canStage: boolean;
   readonly canMarkReviewed: boolean;
   readonly reviewed: boolean | null;
@@ -128,6 +130,10 @@ export function parseHelixReviewMarkers(buffer: string): HelixReviewMarker[] {
         markers.push({ nonce, payload: { v: 1, kind: value.kind } });
       } else if (value.kind === "state") {
         if (
+          (value.mode !== undefined &&
+            value.mode !== null &&
+            value.mode !== "work" &&
+            value.mode !== "review") ||
           typeof value.canStage !== "boolean" ||
           typeof value.canMarkReviewed !== "boolean" ||
           (value.reviewed !== null && typeof value.reviewed !== "boolean") ||
@@ -153,6 +159,7 @@ export function parseHelixReviewMarkers(buffer: string): HelixReviewMarker[] {
               ![
                 "v",
                 "kind",
+                "mode",
                 "canStage",
                 "canMarkReviewed",
                 "reviewed",
@@ -174,6 +181,7 @@ export function parseHelixReviewMarkers(buffer: string): HelixReviewMarker[] {
           payload: {
             v: 1,
             kind: "state",
+            ...(value.mode === "work" || value.mode === "review" ? { mode: value.mode } : {}),
             canStage: value.canStage,
             canMarkReviewed: value.canMarkReviewed,
             reviewed: value.reviewed,
@@ -256,6 +264,7 @@ export function resolveHelixReviewState(
       marker.nonce === nonce
     ) {
       const {
+        mode,
         canStage,
         canMarkReviewed,
         reviewed,
@@ -271,6 +280,7 @@ export function resolveHelixReviewState(
       } = marker.payload;
       state = {
         nonce,
+        ...(mode === undefined ? {} : { mode }),
         canStage,
         canMarkReviewed,
         reviewed,
@@ -290,6 +300,7 @@ export function resolveHelixReviewState(
   if (
     previousState &&
     previousState.nonce === state.nonce &&
+    previousState.mode === state.mode &&
     previousState.canStage === state.canStage &&
     previousState.canMarkReviewed === state.canMarkReviewed &&
     previousState.reviewed === state.reviewed &&

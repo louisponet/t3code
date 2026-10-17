@@ -199,6 +199,7 @@ export function HelixPullRequestFileScreen(props: {
           sessions: known.sessions ?? [],
           uniqueSuffix: uuidv4(),
           options: {
+            mode: "review",
             ...(params.commit ? commitDiff.data?.helixComparison : {}),
             filePath: params.path,
             ...(params.focus ? { line: params.focus.start, side: params.focus.side } : {}),
@@ -209,6 +210,7 @@ export function HelixPullRequestFileScreen(props: {
           stagePendingTerminalLaunch({ target: launch.target, launch: launch.launch });
         else
           stageHelixOpen(launch.target, {
+            mode: "review",
             ...(params.commit ? commitDiff.data?.helixComparison : {}),
             filePath: params.path,
             ...(params.focus ? { line: params.focus.start, side: params.focus.side } : {}),

@@ -302,7 +302,7 @@ function useThreadGitHeaderActionItems(props: ThreadGitControlsProps): ThreadGit
             ...(props.onReviewInHelix
               ? [
                   {
-                    label: "Review in HX",
+                    label: "Work together in HX",
                     icon: { name: "text.bubble", type: "sfSymbol" as const },
                     onPress: props.onReviewInHelix,
                     type: "action" as const,
@@ -509,7 +509,7 @@ export function ThreadGitControls(props: ThreadGitControlsProps) {
         >
           {props.onReviewInHelix ? (
             <Toolbar.MenuAction icon="text.bubble" onPress={props.onReviewInHelix}>
-              <Toolbar.Label>Review in HX</Toolbar.Label>
+              <Toolbar.Label>Work together in HX</Toolbar.Label>
             </Toolbar.MenuAction>
           ) : null}
           {props.projectScripts.length > 0 ? (

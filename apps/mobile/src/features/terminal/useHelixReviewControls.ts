@@ -13,12 +13,14 @@ import {
 } from "@t3tools/client-runtime/helix-review-control";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { uuidv4 } from "../../lib/uuid";
+import type { HelixMode } from "@t3tools/client-runtime/helix-review";
 
 import { peekHelixOpen, takeHelixOpen, useHelixOpenRevision } from "./helixOpenContext";
 
 type Prompt = {
   id: string;
   action: "ask" | "send" | "comment";
+  mode: HelixMode;
   target: HelixReviewTarget;
   title: string;
   text: string;
@@ -316,7 +318,7 @@ export function useHelixReviewControls(input: {
       }
       return payload;
     },
-    ready: target !== null,
+    ready: target !== null && reviewState !== null,
     state: target !== null ? reviewState : null,
     canDiscover: input.enabled && input.canDiscover && input.attached,
     discover,
@@ -349,6 +351,12 @@ export function useHelixReviewControls(input: {
     onAction: (action: HelixReviewAction) => {
       if (!target || busyRef.current || canRetry) return;
       const state = latest.current.reviewState;
+      if (state === null) return;
+      if (
+        state?.mode === "review" &&
+        ["stage", "comment", "discard-last-comment", "send"].includes(action)
+      )
+        return;
       if (
         (action === "stage" && state !== null && !state.canStage) ||
         (action === "mark-reviewed" && (!state?.canMarkReviewed || state.reviewed !== false)) ||
@@ -363,7 +371,14 @@ export function useHelixReviewControls(input: {
       setError(null);
       setNotice(null);
       if (action === "ask" || action === "send" || action === "comment") {
-        setPrompt({ id: uuidv4(), action, target, title: input.title, text: "" });
+        setPrompt({
+          id: uuidv4(),
+          action,
+          mode: state?.mode ?? "work",
+          target,
+          title: input.title,
+          text: "",
+        });
       } else {
         void submit(target, action);
       }

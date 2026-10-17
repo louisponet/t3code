@@ -140,10 +140,10 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
               {props.onReviewInHelix ? (
                 <ThreadDetailsControl
                   onClick={props.onReviewInHelix}
-                  title="Review this thread in HX, or return to its open review."
+                  title="Work on this thread in HX, or return to its open editor."
                 >
                   <FileCheckIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
-                  <span className={THREAD_DETAILS_PANEL_LABEL_CLASS}>Review in HX</span>
+                  <span className={THREAD_DETAILS_PANEL_LABEL_CLASS}>Work together in HX</span>
                 </ThreadDetailsControl>
               ) : null}
 

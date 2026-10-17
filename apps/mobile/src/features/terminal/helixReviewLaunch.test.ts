@@ -47,9 +47,48 @@ function session(
 }
 
 describe("mobile HX review launch", () => {
+  it("returns to a project-root editor when switching from an explicit cwd", () => {
+    const running = session("helix-review-work-root", "running");
+    const existing = {
+      ...running,
+      state: {
+        ...running.state,
+        summary: { ...running.state.summary!, cwd: context.workspaceRoot, worktreePath: null },
+      },
+    };
+    const prepared = prepareHelixReviewLaunch({
+      ...context,
+      threadShellWorktreePath: null,
+      threadDetailWorktreePath: null,
+      sessions: [existing],
+      options: { mode: "work", worktreePath: context.workspaceRoot },
+    });
+    expect(prepared.target.terminalId).toBe(existing.target.terminalId);
+    expect(prepared.launch).toBeNull();
+  });
+  it("keeps work and PR review launches separate and returns to each running editor", () => {
+    const prepare = createHelixLaunchCoordinator();
+    const work = prepare({ ...context, sessions: [], options: { mode: "work" } });
+    const review = prepare({ ...context, sessions: [], options: { mode: "review" } });
+    expect(work.target.terminalId).not.toBe(review.target.terminalId);
+    expect(work.launch?.initialInput).toContain('"mode":"work"');
+    expect(review.launch?.initialInput).toContain('"mode":"review"');
+    const sessions = [
+      session(work.target.terminalId, "running"),
+      session(review.target.terminalId, "running"),
+    ];
+    for (const [mode, target] of [
+      ["work", work.target],
+      ["review", review.target],
+    ] as const) {
+      const reopened = prepare({ ...context, sessions, options: { mode } });
+      expect(reopened.target).toEqual(target);
+      expect(reopened.launch).toBeNull();
+    }
+  });
   it("stages the selected remote thread and freshest worktree for the terminal route once", () => {
     const prepared = prepareHelixReviewLaunch({ ...context, sessions: [] });
-    expect(prepared.target).toEqual({ ...threadRef, terminalId: "helix-review-new-launch" });
+    expect(prepared.target).toEqual({ ...threadRef, terminalId: "helix-review-work-new-launch" });
     expect(prepared.launch).toMatchObject({
       cwd: "/remote/worktrees/review",
       worktreePath: "/remote/worktrees/review",
@@ -77,9 +116,9 @@ describe("mobile HX review launch", () => {
   it("opens a live dedicated session without putting a command into the active editor", () => {
     const prepared = prepareHelixReviewLaunch({
       ...context,
-      sessions: [session("default", "running"), session("helix-review-live", "running")],
+      sessions: [session("default", "running"), session("helix-review-work-live", "running")],
     });
-    expect(prepared.target.terminalId).toBe("helix-review-live");
+    expect(prepared.target.terminalId).toBe("helix-review-work-live");
     expect(prepared.launch).toBeNull();
   });
 
@@ -100,7 +139,7 @@ describe("mobile HX review launch", () => {
         }),
       ],
     });
-    expect(prepared.target.terminalId).toBe("helix-review-new-launch");
+    expect(prepared.target.terminalId).toBe("helix-review-work-new-launch");
     expect(prepared.launch?.cwd).toBe("/remote/project");
     expect(prepared.launch?.worktreePath).toBeNull();
   });
@@ -128,7 +167,7 @@ describe("mobile HX review launch", () => {
       sessions: [stale],
       threadDetailWorktreePath: "/remote/new-worktree",
     });
-    expect(prepared.target.terminalId).toBe("helix-review-new-launch");
+    expect(prepared.target.terminalId).toBe("helix-review-work-new-launch");
     expect(prepared.launch?.cwd).toBe("/remote/new-worktree");
   });
   it("reuses one launching editor when different files open before terminal registration", () => {
@@ -164,7 +203,7 @@ describe("mobile HX review launch", () => {
       uniqueSuffix: "after-exit",
       sessions: [session(second.target.terminalId, "exited")],
     });
-    expect(exited.target.terminalId).toBe("helix-review-after-exit");
+    expect(exited.target.terminalId).toBe("helix-review-work-after-exit");
     expect(exited.launch).not.toBeNull();
   });
 });

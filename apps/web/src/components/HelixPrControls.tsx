@@ -146,7 +146,7 @@ export function HelixPrControls({
             if (!open) void run(() => request("pr-review"));
           }}
         >
-          PR review
+          Review drafts
         </Button>
         {review ? (
           <span>
@@ -200,7 +200,7 @@ export function HelixPrControls({
                   })
                 }
               >
-                Save line comment
+                Save PR comment draft
               </Button>
             </div>
           ) : (
@@ -359,7 +359,7 @@ export function HelixPrControls({
                   })
                 }
               >
-                Submit review
+                Submit review to GitHub
               </Button>
               <Button size="xs" onClick={() => setPreview(null)}>
                 Back to drafts

@@ -24,6 +24,7 @@ import {
   findOpenHelixReviewTerminal,
   helixReviewCommand,
   newHelixReviewTerminalId,
+  type HelixMode,
   type HelixOpenOptions,
 } from "@t3tools/client-runtime/helix-review";
 import {
@@ -77,7 +78,22 @@ export default function HelixPanel({
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
-  const targetJson = JSON.stringify(options);
+  const sourceJson = JSON.stringify(options);
+  const [modeSelection, setModeSelection] = useState<{
+    sourceJson: string;
+    mode: HelixMode;
+  } | null>(null);
+  const mode =
+    modeSelection?.sourceJson === sourceJson ? modeSelection.mode : (options.mode ?? "work");
+  const targetJson = JSON.stringify(
+    mode === (options.mode ?? "work")
+      ? { ...options, mode }
+      : {
+          mode,
+          worktreePath: options.worktreePath,
+          filePath: options.filePath,
+        },
+  );
   const launchRequest = useEffectEvent(() => ({
     cwd,
     worktreePath,
@@ -86,7 +102,12 @@ export default function HelixPanel({
     open,
     write,
   }));
-  const key = JSON.stringify([threadRef.environmentId, threadRef.threadId, worktreePath ?? cwd]);
+  const key = JSON.stringify([
+    threadRef.environmentId,
+    threadRef.threadId,
+    worktreePath ?? cwd,
+    mode,
+  ]);
   const editor = editorOwner?.key === key ? editorOwner.editor : null;
   useEffect(() => {
     if (!canRead || !canOperate || sessions === null) return;
@@ -101,10 +122,12 @@ export default function HelixPanel({
             (entry.state.summary?.worktreePath ?? entry.state.summary?.cwd) ===
             (worktreePath ?? cwd),
         ),
+        undefined,
+        mode,
       );
       pending = (async () => {
         if (existing) return { terminalId: existing };
-        const terminalId = newHelixReviewTerminalId(randomUUID());
+        const terminalId = newHelixReviewTerminalId(randomUUID(), mode);
         const result = await open({
           environmentId: threadRef.environmentId,
           input: {
@@ -151,7 +174,7 @@ export default function HelixPanel({
     return () => {
       cancelled = true;
     };
-  }, [key, canRead, canOperate, sessions, retry]);
+  }, [key, mode, canRead, canOperate, sessions, retry]);
   if (!canRead || !canOperate)
     return (
       <p className="p-4 text-sm text-muted-foreground">
@@ -183,6 +206,8 @@ export default function HelixPanel({
       targetJson={targetJson}
       requestId={requestId}
       keybindings={keybindings}
+      requestedMode={mode}
+      onModeChange={(mode) => setModeSelection({ sourceJson, mode })}
       onExit={() => {
         editors.delete(key);
         setEditorOwner(null);
@@ -200,6 +225,8 @@ function HelixSession({
   targetJson,
   requestId,
   keybindings,
+  requestedMode,
+  onModeChange,
   onExit,
 }: {
   threadRef: ScopedThreadRef;
@@ -209,6 +236,8 @@ function HelixSession({
   targetJson: string;
   requestId: number;
   keybindings: ResolvedKeybindingsConfig;
+  requestedMode: HelixMode;
+  onModeChange: (mode: HelixMode) => void;
   onExit: () => void;
 }) {
   const session = useAttachedTerminalSession({
@@ -249,6 +278,7 @@ function HelixSession({
     nonce,
     cachedState.lifecycle === lifecycle ? cachedState.state : null,
   );
+  const reviewing = (state?.mode ?? "work") === "review";
   if (cachedState.lifecycle !== lifecycle || cachedState.state !== state)
     setCachedState({ lifecycle, state });
   const target =
@@ -356,7 +386,26 @@ function HelixSession({
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-border/60 p-1 text-xs">
-        <span className="px-2 font-medium">Helix</span>
+        <span className="px-2 font-medium">
+          {state
+            ? reviewing
+              ? "Review a PR"
+              : "Work together"
+            : requestedMode === "review"
+              ? "Opening PR review…"
+              : "Opening work session…"}
+        </span>
+        {reviewing ||
+        thread?.linkedPullRequest ||
+        thread?.pullRequests?.some((link) => link.source !== "stack-dismissed") ? (
+          <Button
+            size="xs"
+            disabled={!state || busy}
+            onClick={() => onModeChange(reviewing ? "work" : "review")}
+          >
+            {reviewing ? "Work together" : "Review a PR"}
+          </Button>
+        ) : null}
         <Button size="xs" disabled={!target || busy} onClick={() => run("files")}>
           Files
         </Button>
@@ -366,19 +415,25 @@ function HelixSession({
         <Button size="xs" disabled={!target || busy} onClick={() => run("next")}>
           Next
         </Button>
-        <Button size="xs" disabled={!state?.canStage || busy} onClick={() => run("stage")}>
-          Stage
-        </Button>
-        <Button
-          size="xs"
-          disabled={!state?.canMarkReviewed || busy}
-          onClick={() => run(state?.reviewed ? "unmark-reviewed" : "mark-reviewed")}
-        >
-          {state?.reviewed ? "Unmark reviewed" : "Mark reviewed"}
-        </Button>
-        <span className="text-muted-foreground">
-          {state ? `${state.reviewedCount}/${state.totalCount} reviewed` : "Connecting to HX…"}
-        </span>
+        {state && !reviewing ? (
+          <Button size="xs" disabled={!state?.canStage || busy} onClick={() => run("stage")}>
+            Stage
+          </Button>
+        ) : null}
+        {reviewing ? (
+          <Button
+            size="xs"
+            disabled={!state?.canMarkReviewed || busy}
+            onClick={() => run(state?.reviewed ? "unmark-reviewed" : "mark-reviewed")}
+          >
+            {state?.reviewed ? "Unmark reviewed" : "Mark reviewed"}
+          </Button>
+        ) : null}
+        {reviewing || !state ? (
+          <span className="text-muted-foreground">
+            {state ? `${state.reviewedCount}/${state.totalCount} reviewed` : "Connecting to HX…"}
+          </span>
+        ) : null}
       </div>
       {!nonce ? (
         <div
@@ -458,48 +513,69 @@ function HelixSession({
           keybindings={keybindings}
         />
       </div>
-      <form
-        className="flex shrink-0 flex-col gap-1 border-t border-border/60 p-1"
-        onSubmit={(event) => {
-          event.preventDefault();
-          submitText("comment");
-        }}
-      >
-        <input
-          aria-label="Comment or question about the selected code"
-          className="w-full min-w-0 bg-transparent px-2 py-1 text-xs outline-none"
-          placeholder="Comment or ask about the selected code…"
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-        />
-        <div className="flex w-full flex-wrap items-center gap-1">
-          <Button size="xs" type="submit" disabled={!state?.canComment || !text.trim() || busy}>
-            Comment
-          </Button>
-          <Button
-            size="xs"
-            disabled={!target || state?.canAsk === false || !text.trim() || busy}
-            onClick={() => submitText("ask")}
-          >
-            Ask
-          </Button>
-          <Button
-            size="xs"
-            disabled={!state?.pendingCommentCount || busy}
-            onClick={() => run("discard-last-comment")}
-          >
-            Undo comment
-          </Button>
-          <Button
-            size="xs"
-            disabled={!target || state?.canSend === false || busy}
-            onClick={() => run("send")}
-          >
-            Send{state?.pendingCommentCount ? ` (${state.pendingCommentCount})` : ""}
-          </Button>
-        </div>
-      </form>
-      {state?.canReviewPr && target && thread ? (
+      {state ? (
+        <form
+          className="flex shrink-0 flex-col gap-1 border-t border-border/60 p-1"
+          onSubmit={(event) => {
+            event.preventDefault();
+            submitText(reviewing ? "ask" : "comment");
+          }}
+        >
+          <input
+            aria-label={
+              reviewing ? "Ask the agent about this PR" : "Comment or question for the agent"
+            }
+            className="w-full min-w-0 bg-transparent px-2 py-1 text-xs outline-none"
+            placeholder={
+              reviewing
+                ? "Ask your co-reviewer about the selected code…"
+                : "Comment or ask about the selected code…"
+            }
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+          />
+          <div className="flex w-full flex-wrap items-center gap-1">
+            {!reviewing ? (
+              <Button size="xs" type="submit" disabled={!state?.canComment || !text.trim() || busy}>
+                Comment for agent
+              </Button>
+            ) : null}
+            <Button
+              size="xs"
+              disabled={!target || state?.canAsk === false || !text.trim() || busy}
+              onClick={() => submitText("ask")}
+            >
+              Ask agent
+            </Button>
+            {!reviewing ? (
+              <>
+                <Button
+                  size="xs"
+                  disabled={!state?.pendingCommentCount || busy}
+                  onClick={() => run("discard-last-comment")}
+                >
+                  Undo comment
+                </Button>
+                <Button
+                  size="xs"
+                  disabled={!target || state?.canSend === false || busy}
+                  onClick={() => run("send")}
+                >
+                  Send to agent{state?.pendingCommentCount ? ` (${state.pendingCommentCount})` : ""}
+                </Button>
+              </>
+            ) : null}
+          </div>
+        </form>
+      ) : null}
+      {reviewing ? (
+        <p className="shrink-0 px-2 py-1 text-xs text-muted-foreground">
+          {state?.canReviewPr
+            ? "Edit selected code in HX to draft a suggestion. Drafts stay here until you submit your review to GitHub."
+            : "Historical comparisons are read-only. Open a current PR file to draft comments and suggestions."}
+        </p>
+      ) : null}
+      {reviewing && state?.canReviewPr && target && thread ? (
         <HelixPrControls
           key={target.nonce}
           target={target}

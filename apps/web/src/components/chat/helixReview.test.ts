@@ -12,6 +12,47 @@ import {
 } from "./helixReview";
 
 describe("helixReviewCommand", () => {
+  it.each(["work", "review"] as const)(
+    "carries quoted file locations in one argument in %s mode",
+    (mode) => {
+      const command = helixReviewCommand("thread-1", "environment-1", {
+        filePath: "src/it's $(danger).ts",
+        line: 12,
+        worktreePath: "/tmp/repo",
+        mode,
+      });
+      const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "helix-launch-"));
+      try {
+        NodeFS.writeFileSync(
+          NodePath.join(directory, "hx-t3"),
+          '#!/bin/sh\nprintf "%s\\n" "$@"\n',
+          {
+            mode: 0o755,
+          },
+        );
+        const output = NodeChildProcess.execFileSync("sh", ["-c", command], {
+          env: { ...process.env, PATH: `${directory}:${process.env.PATH}` },
+          encoding: "utf8",
+        });
+        expect(output.trim().split("\n")).toEqual([
+          "--thread",
+          "thread-1",
+          "--environment-id",
+          "environment-1",
+          "--location",
+          JSON.stringify({
+            filePath: "src/it's $(danger).ts",
+            line: 12,
+            worktreePath: "/tmp/repo",
+            mode,
+          }),
+        ]);
+      } finally {
+        NodeFS.rmSync(directory, { recursive: true, force: true });
+      }
+      expect(() => helixReviewCommand("thread-1", "environment-1", { line: 0 })).toThrow();
+    },
+  );
   it("passes the exact thread identity through the interactive and child shells", () => {
     const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-helix-review-"));
     try {
@@ -28,7 +69,9 @@ describe("helixReviewCommand", () => {
           env: { PATH: `${root}:/usr/bin:/bin` },
         },
       );
-      expect(output).toBe(`4\n--thread\n${threadId}\n--environment-id\n${environmentId}\n`);
+      expect(output).toBe(
+        `6\n--thread\n${threadId}\n--environment-id\n${environmentId}\n--location\n{"mode":"work"}\n`,
+      );
     } finally {
       NodeFS.rmSync(root, { recursive: true, force: true });
     }

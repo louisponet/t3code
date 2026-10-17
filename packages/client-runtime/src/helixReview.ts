@@ -1,5 +1,7 @@
 const HELIX_REVIEW_TERMINAL_PREFIX = "helix-review";
 
+export type HelixMode = "work" | "review";
+
 export function isHelixReviewTerminal(terminalId: string): boolean {
   return (
     terminalId === HELIX_REVIEW_TERMINAL_PREFIX ||
@@ -13,20 +15,23 @@ export function findOpenHelixReviewTerminal(
     readonly state: { readonly status: string };
   }>,
   visibleTerminalIds?: readonly string[],
+  mode?: HelixMode,
 ): string | null {
   return (
     sessions.find(
       ({ target, state }) =>
         isHelixReviewTerminal(target.terminalId) &&
+        (mode === undefined ||
+          target.terminalId.startsWith(`${HELIX_REVIEW_TERMINAL_PREFIX}-${mode}-`)) &&
         state.status === "running" &&
         (visibleTerminalIds === undefined || visibleTerminalIds.includes(target.terminalId)),
     )?.target.terminalId ?? null
   );
 }
 
-export function newHelixReviewTerminalId(uniqueSuffix: string): string {
+export function newHelixReviewTerminalId(uniqueSuffix: string, mode: HelixMode = "work"): string {
   // An old viewport's delayed close must never target a newly opened review.
-  return `${HELIX_REVIEW_TERMINAL_PREFIX}-${uniqueSuffix}`;
+  return `${HELIX_REVIEW_TERMINAL_PREFIX}-${mode}-${uniqueSuffix}`;
 }
 
 function quoteShell(value: string): string {
@@ -34,6 +39,7 @@ function quoteShell(value: string): string {
 }
 
 export interface HelixOpenOptions {
+  readonly mode?: HelixMode;
   readonly filePath?: string;
   readonly line?: number;
   readonly column?: number;
@@ -50,6 +56,8 @@ export function helixReviewCommand(
   environmentId: string,
   options: HelixOpenOptions = {},
 ): string {
+  options = { ...options, mode: options.mode ?? "work" };
+  if (options.mode !== "work" && options.mode !== "review") throw new Error("Invalid HX mode.");
   if (
     !threadId ||
     !environmentId ||

@@ -373,6 +373,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["output token paragraph buffered wait turn legacy"],
   },
   {
+    id: "helix-code-views",
+    title: "Helix code views",
+    to: "/settings/general",
+    searchTerms: ["hx editor diff changes files pull request pr code review source terminal"],
+  },
+  {
     id: "hide-whitespace-changes",
     title: "Hide whitespace changes",
     to: "/settings/general",

@@ -63,6 +63,7 @@ import {
   stagePendingTerminalLaunch,
 } from "../terminal/terminalLaunchContext";
 import { terminalDebugLog } from "../terminal/terminalDebugLog";
+import { useHelixCodeViewsEnabled } from "../terminal/useHelixCodeViewsEnabled";
 import { useOpenInHelix } from "../terminal/useOpenInHelix";
 import { ThreadDetailScreen, type ThreadDetailScreenProps } from "./ThreadDetailScreen";
 import { GitOverviewSheet } from "./git/GitOverviewSheet";
@@ -767,8 +768,9 @@ function ThreadRouteContent(
       knownTerminalSessions,
     ],
   );
+  const helixCodeViews = useHelixCodeViewsEnabled();
   const helixEditor = useOpenInHelix(environmentId ?? null, threadId ?? null);
-  const canReviewInHelix = helixEditor.available;
+  const canReviewInHelix = helixCodeViews && helixEditor.available;
   const handleReviewInHelix = useCallback(() => {
     helixEditor.open();
   }, [helixEditor]);

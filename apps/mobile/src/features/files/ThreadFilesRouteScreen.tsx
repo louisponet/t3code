@@ -48,6 +48,8 @@ import { ThreadInspectorContentStack } from "../threads/thread-inspector-content
 import { FileTreeBrowser } from "./FileTreeBrowser";
 import { useFileTreeEntries } from "./useFileTreeEntries";
 import { preloadWorkspaceFileContents } from "./preload-workspace-file";
+import { SourceFileSurface } from "./SourceFileSurface";
+import { useHelixCodeViewsEnabled } from "../terminal/useHelixCodeViewsEnabled";
 import { useOpenInHelix } from "../terminal/useOpenInHelix";
 import { useNativeColumnLayoutMetrics } from "../../native/native-layout-metrics";
 import { ThreadFileNavigatorPane } from "./thread-file-navigator-pane";
@@ -319,9 +321,13 @@ function FileContent(props: {
           onRefresh={props.onRefresh}
         />
       ) : (
-        <FilePreviewNotice title="Open in Helix">
-          Open this file from its thread to view and edit the source.
-        </FilePreviewNotice>
+        <SourceFileSurface
+          contents={props.fileContents}
+          path={props.relativePath}
+          initialLine={props.initialLine}
+          headerInsetTop={props.truncated ? 0 : undefined}
+          onRefresh={props.onRefresh}
+        />
       )}
     </View>
   );
@@ -616,12 +622,14 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps) {
       : defaultViewMode(relativePath);
   const resolvedActiveMode =
     isVideoFile || isAudioFile ? "preview" : canPreview ? activeMode : "source";
+  const helixCodeViews = useHelixCodeViewsEnabled();
+  const helixSource = helixCodeViews && resolvedActiveMode === "source";
   const helix = useOpenInHelix(environmentId, threadId);
   const openedInHelix = useRef<string | null>(null);
   const helixKey = JSON.stringify([environmentId, threadId, cwd, relativePath, targetLine]);
   useEffect(() => {
     if (
-      resolvedActiveMode !== "source" ||
+      !helixSource ||
       relativePath === null ||
       !helix.available ||
       openedInHelix.current === helixKey
@@ -629,7 +637,7 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps) {
       return;
     if (helix.open({ filePath: relativePath, ...(targetLine ? { line: targetLine } : {}) }))
       openedInHelix.current = helixKey;
-  }, [helix, helixKey, relativePath, resolvedActiveMode, targetLine]);
+  }, [helix, helixKey, helixSource, relativePath, targetLine]);
   const assetPreviewPath =
     isBrowserFile || isImageFile || isVideoFile || isAudioFile ? relativePath : null;
   const assetPreview = useWorkspaceFileAssetUrlState({
@@ -709,7 +717,7 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps) {
       cwd !== null &&
       relativePath !== null &&
       needsFileContents &&
-      resolvedActiveMode !== "source"
+      !helixSource
       ? projectEnvironment.readFile({
           environmentId,
           input: { cwd, relativePath },
@@ -786,7 +794,7 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps) {
       canToggleMode
         ? ({
             id: "source",
-            title: "Helix",
+            title: helixCodeViews ? "Helix" : "Source",
             icon: "doc.text",
             inline: true,
             onPress: () => setModeOverride({ path: relativePath, mode: "source" }),
@@ -929,7 +937,7 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps) {
     );
   }
 
-  if (resolvedActiveMode === "source") {
+  if (helixSource) {
     return (
       <View className="flex-1 bg-sheet">
         <NativeStackScreenOptions options={{ title: basename(relativePath) }} />

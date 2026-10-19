@@ -50,7 +50,11 @@ import { MediaVideoPlayer } from "~/components/media/MediaVideoPlayer";
 import { MediaActions, type MediaActionSource } from "~/components/media/MediaActions";
 import { MorphIcon } from "~/components/MorphIcon";
 import { useRemoteOpenState } from "~/remoteOpen";
-import { useClientSettings, useUpdateClientSettings } from "~/hooks/useSettings";
+import {
+  useClientSettings,
+  useHelixCodeViewsEnabled,
+  useUpdateClientSettings,
+} from "~/hooks/useSettings";
 import { useTheme } from "~/hooks/useTheme";
 import { getLocalStorageItem, setLocalStorageItem, useLocalStorage } from "~/hooks/useLocalStorage";
 import { useWorkspaceMutationRefresh } from "~/hooks/useWorkspaceMutationRefresh";
@@ -1039,6 +1043,9 @@ export default function FilePreviewPanel({
   const draft = typeof composerDraftTarget === "string";
   const { resolvedTheme } = useTheme();
   const wordWrap = useClientSettings((settings) => settings.wordWrap);
+  const helixCodeViews = useHelixCodeViewsEnabled();
+  // A line reveal opens the source in Helix rather than a rendered preview.
+  const revealInHelix = helixCodeViews && revealLine !== null;
   const canOperatePreview = useEnvironmentScope(environmentId, AuthPreviewOperateScope);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const remoteOpenState = useRemoteOpenState(environmentId);
@@ -1397,7 +1404,7 @@ export default function FilePreviewPanel({
               alt={relativePath}
               workspaceMutationId={workspaceMutationId}
             />
-          ) : relativePath && renderBrowserFile && absolutePath && revealLine === null ? (
+          ) : relativePath && renderBrowserFile && absolutePath && !revealInHelix ? (
             <WorkspaceBrowserPreview
               key={absolutePath}
               environmentId={environmentId}
@@ -1441,7 +1448,7 @@ export default function FilePreviewPanel({
               <Spinner size="lg" />
             </div>
           ) : relativePath && file.data ? (
-            isMarkdown && renderMarkdown && revealLine === null ? (
+            isMarkdown && renderMarkdown && !revealInHelix ? (
               <RenderedMarkdownSurface
                 key={relativePath}
                 environmentId={environmentId}
@@ -1452,14 +1459,14 @@ export default function FilePreviewPanel({
                 readOnly={isHostFile || !canWriteFiles}
                 onPendingChange={onPendingChange}
               />
-            ) : tableDelimiter && renderTable && revealLine === null ? (
+            ) : tableDelimiter && renderTable && !revealInHelix ? (
               <DelimitedTablePreview
                 key={relativePath}
                 name={relativePath}
                 text={file.data.contents}
                 delimiter={tableDelimiter}
               />
-            ) : attachment === undefined ? (
+            ) : helixCodeViews && attachment === undefined ? (
               <HelixPanel
                 threadRef={threadRef}
                 cwd={cwd}

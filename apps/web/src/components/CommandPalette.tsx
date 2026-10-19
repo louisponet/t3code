@@ -1840,6 +1840,7 @@ function OpenCommandPaletteDialog(props: {
   }
 
   if (
+    clientSettings.helixCodeViewsEnabled &&
     activeThread &&
     readEnvironmentScope(activeThread.environmentId, AuthTerminalReadScope) &&
     readEnvironmentScope(activeThread.environmentId, AuthTerminalOperateScope) &&

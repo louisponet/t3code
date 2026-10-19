@@ -394,6 +394,13 @@ export function useLegacySidebarEnabled(): boolean {
   return settingsHydrated && legacySidebarEnabled;
 }
 
+/** False until client settings hydrate, so a view never starts a Helix editor the user turned off. */
+export function useHelixCodeViewsEnabled(): boolean {
+  const settingsHydrated = useClientSettingsHydrated();
+  const helixCodeViewsEnabled = useClientSettingsValue().helixCodeViewsEnabled;
+  return settingsHydrated && helixCodeViewsEnabled;
+}
+
 export async function prepareModelPreferencesPatch(
   settings: ServerSettings,
   patch: ServerSettingsPatch,

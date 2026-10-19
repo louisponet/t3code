@@ -347,6 +347,7 @@ import {
   useClientSettings,
   useClientSettingsHydrated,
   useEnvironmentSettings,
+  useHelixCodeViewsEnabled,
 } from "../hooks/useSettings";
 import { useNowMinute } from "../hooks/useNowMinute";
 import { usePanelAnimationSettings, usePanelPresence } from "../panelAnimations";
@@ -4926,7 +4927,8 @@ export default function ChatView(props: ChatViewProps) {
     }
   };
   const runProjectScriptStable = useStableCallback(runProjectScript);
-  const canReviewInHelix = isServerThread && activeProject !== null;
+  const helixCodeViews = useHelixCodeViewsEnabled();
+  const canReviewInHelix = helixCodeViews && isServerThread && activeProject !== null;
   const reviewInHelix = useStableCallback(() => {
     if (!activeThreadRef) return;
     useDiffPanelStore.getState().selectGitScope(activeThreadRef, "branch");

@@ -1,3 +1,4 @@
+import { useAtomSet } from "@effect/atom-react";
 import { useCallback } from "react";
 
 import {
@@ -6,6 +7,8 @@ import {
   MIN_CODE_FONT_SIZE,
 } from "../../../../lib/appearancePreferences";
 import { SettingsSection } from "../../components/SettingsSection";
+import { updateMobilePreferencesAtom } from "../../../../state/preferences";
+import { useHelixCodeViewsEnabled } from "../../../terminal/useHelixCodeViewsEnabled";
 import { SettingsSwitchRow } from "../../components/SettingsSwitchRow";
 import { useAppearancePreferences } from "../AppearancePreferencesProvider";
 import {
@@ -17,6 +20,8 @@ import { FontSizeSliderRow } from "../components/FontSizeSliderRow";
 export function CodeAppearanceSection() {
   const { isReady, appearance, setCodeFontSize, setCodeWordBreak } = useAppearancePreferences();
   const custom = appearance.isCodeFontSizeCustom;
+  const savePreferences = useAtomSet(updateMobilePreferencesAtom);
+  const helixCodeViews = useHelixCodeViewsEnabled();
 
   const handleToggleCustom = useCallback(
     (enabled: boolean) => {
@@ -58,6 +63,14 @@ export function CodeAppearanceSection() {
         label="Word break"
         onValueChange={setCodeWordBreak}
         value={appearance.codeWordBreak}
+      />
+      <SettingsSwitchRow
+        disabled={!isReady}
+        icon="terminal"
+        label="Open in Helix"
+        subtitle="Open changes, files and pull request code in a Helix editor."
+        onValueChange={(value) => savePreferences({ helixCodeViewsEnabled: value })}
+        value={helixCodeViews}
       />
     </SettingsSection>
   );

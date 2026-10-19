@@ -598,6 +598,9 @@ export function useSettingsRestore(onRestored?: () => void) {
         ? ["Composer context"]
         : []),
       ...getChangedTypographySettingLabels(settings),
+      ...(settings.helixCodeViewsEnabled !== DEFAULT_UNIFIED_SETTINGS.helixCodeViewsEnabled
+        ? ["Helix code views"]
+        : []),
       ...(settings.diffFilesCollapsed !== DEFAULT_UNIFIED_SETTINGS.diffFilesCollapsed
         ? ["Default diff file state"]
         : []),
@@ -689,6 +692,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.addProjectBaseDirectory,
       settings.defaultThreadEnvMode,
       settings.newWorktreesStartFromOrigin,
+      settings.helixCodeViewsEnabled,
       settings.diffFilesCollapsed,
       settings.diffIgnoreWhitespace,
       settings.diffLayout,
@@ -794,6 +798,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       inAppNotificationsEnabled: DEFAULT_UNIFIED_SETTINGS.inAppNotificationsEnabled,
       wordWrap: DEFAULT_UNIFIED_SETTINGS.wordWrap,
       persistComposerContextStrip: DEFAULT_UNIFIED_SETTINGS.persistComposerContextStrip,
+      helixCodeViewsEnabled: DEFAULT_UNIFIED_SETTINGS.helixCodeViewsEnabled,
       diffFilesCollapsed: DEFAULT_UNIFIED_SETTINGS.diffFilesCollapsed,
       diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
       diffLayout: DEFAULT_UNIFIED_SETTINGS.diffLayout,
@@ -2552,6 +2557,31 @@ export function GeneralSettingsPanel() {
                 </SelectItem>
               </SelectPopup>
             </Select>
+          }
+        />
+        <SettingsRow
+          {...searchableSetting("helix-code-views")}
+          description="Open changes, files and pull request code in a Helix editor. Turn off to use the built-in diff and file views."
+          resetAction={
+            settings.helixCodeViewsEnabled !== DEFAULT_UNIFIED_SETTINGS.helixCodeViewsEnabled ? (
+              <SettingResetButton
+                label="Helix code views"
+                onClick={() =>
+                  updateSettings({
+                    helixCodeViewsEnabled: DEFAULT_UNIFIED_SETTINGS.helixCodeViewsEnabled,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.helixCodeViewsEnabled}
+              onCheckedChange={(checked) =>
+                updateSettings({ helixCodeViewsEnabled: Boolean(checked) })
+              }
+              aria-label="Use Helix for code views"
+            />
           }
         />
         <SettingsRow

@@ -27,6 +27,11 @@ it there. Missing setup or an outdated integration appears in the code pane.
 The thread header, workspace details, and command palette also provide a direct
 way to open Helix.
 
+Helix is on by default. To use the built-in diff, file, and pull request code
+views instead, turn off **Settings → General → Helix code views** on web and
+desktop, or **Settings → Appearance → Open in Helix** on mobile. Each device keeps
+its own choice.
+
 Files in folders without Git or before the first commit still open for editing.
 Review comparisons and agent feedback become available after the first Git commit.
 

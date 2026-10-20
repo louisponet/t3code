@@ -289,19 +289,22 @@ describe("KeybindingsSettings.logic", () => {
   });
 
   it("groups tool shortcuts under Tools", () => {
-    const rows = buildKeybindingRows([
-      {
-        command: "tool.lazygit.open",
-        shortcut: {
-          key: "g",
-          modKey: true,
-          metaKey: false,
-          ctrlKey: false,
-          altKey: false,
-          shiftKey: true,
+    const rows = buildKeybindingRows(
+      [
+        {
+          command: "tool.lazygit.open",
+          shortcut: {
+            key: "g",
+            modKey: true,
+            metaKey: false,
+            ctrlKey: false,
+            altKey: false,
+            shiftKey: true,
+          },
         },
-      },
-    ] satisfies ResolvedKeybindingsConfig);
+      ] satisfies ResolvedKeybindingsConfig,
+      "",
+    );
     expect(groupKeybindingRows(rows)).toEqual([
       expect.objectContaining({ id: "tools", title: "Tools", rows }),
     ]);

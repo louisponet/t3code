@@ -4,7 +4,9 @@ import { settlePromise } from "@t3tools/client-runtime/state/runtime";
 import {
   AuthSettingsWriteScope,
   AuthTerminalReadScope,
+  type BrowserNavigationTarget,
   type ContextMenuItem,
+  type PreviewRuntime,
   ENVIRONMENT_TOOL_TERMINAL_ID,
   type EnvironmentId,
   type EnvironmentToolId,
@@ -23,6 +25,7 @@ import {
 } from "lucide-react";
 import { memo, useState } from "react";
 
+import { browserToolRuntime } from "../../browser/previewRuntime";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { readLocalApi } from "../../localApi";
@@ -96,7 +99,12 @@ const terminalToolRunningAtom = Atom.family((environmentId: EnvironmentId) =>
 
 const NOT_RUNNING_ATOM = Atom.make(false).pipe(Atom.withLabel("sidebar-tool-not-running"));
 
-const hasPreviewSessions = (state: ThreadPreviewState) => Object.keys(state.sessions).length > 0;
+const hasRuntimeSessions = (runtime: PreviewRuntime) => (state: ThreadPreviewState) =>
+  Object.values(state.sessions).some((session) => (session.runtime ?? "desktop") === runtime);
+const HAS_RUNTIME_SESSIONS = {
+  desktop: hasRuntimeSessions("desktop"),
+  server: hasRuntimeSessions("server"),
+};
 
 export const SidebarToolsSection = memo(function SidebarToolsSection() {
   const { rows, issues } = useAtomValue(environmentToolRowsAtom);
@@ -175,7 +183,16 @@ export const SidebarToolsSection = memo(function SidebarToolsSection() {
             navigateToTool(row);
             return;
           case "restart":
-            await openTool({ environmentId, input: { ...input, restart: true } });
+            await openTool({
+              environmentId,
+              input: {
+                ...input,
+                restart: true,
+                ...(definition.kind === "browser"
+                  ? { runtime: browserToolRuntime(environmentId, definition.target) }
+                  : {}),
+              },
+            });
             return;
           case "stop":
             await stopTool({ environmentId, input });
@@ -305,7 +322,11 @@ const SidebarToolRow = memo(function SidebarToolRow(props: {
           "terminal" ? (
           <TerminalToolRunningDot environmentId={row.environmentId} toolId={row.toolId} />
         ) : (
-          <BrowserToolRunningDot environmentId={row.environmentId} toolId={row.toolId} />
+          <BrowserToolRunningDot
+            environmentId={row.environmentId}
+            toolId={row.toolId}
+            target={row.definition.target}
+          />
         )}
       </span>
       <span className={cn("min-w-0 flex-1 truncate", row.offline && "opacity-50")}>
@@ -356,9 +377,18 @@ function TerminalToolRunningDot(props: {
   return running ? <RunningDot /> : null;
 }
 
-function BrowserToolRunningDot(props: { environmentId: EnvironmentId; toolId: EnvironmentToolId }) {
+// Only the runtime this client opens counts: the other runtime's tab is not what it would show.
+function BrowserToolRunningDot(props: {
+  environmentId: EnvironmentId;
+  toolId: EnvironmentToolId;
+  target: BrowserNavigationTarget;
+}) {
   const threadRef = scopeThreadRef(props.environmentId, environmentToolThreadId(props.toolId));
   usePreviewSession(threadRef);
-  const running = useAtomValue(previewStateAtom(scopedThreadKey(threadRef)), hasPreviewSessions);
+  const runtime = browserToolRuntime(props.environmentId, props.target);
+  const running = useAtomValue(
+    previewStateAtom(scopedThreadKey(threadRef)),
+    HAS_RUNTIME_SESSIONS[runtime],
+  );
   return running ? <RunningDot /> : null;
 }

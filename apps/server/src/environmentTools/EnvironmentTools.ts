@@ -16,13 +16,17 @@ import {
   type EnvironmentToolStatus,
   type EnvironmentToolStatusEvent,
   type EnvironmentToolStopInput,
+  type PreviewRuntime,
   type ServerSettings as ServerSettingsValue,
   type TerminalEnvironmentTool,
   type TerminalError,
   type WebEnvironmentTool,
 } from "@t3tools/contracts";
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
-import { browserNavigationTargetUrl } from "@t3tools/shared/browserNavigationTarget";
+import {
+  browserNavigationTargetUrl,
+  browserTargetReachableFromClient,
+} from "@t3tools/shared/browserNavigationTarget";
 import { normalizePreviewUrl } from "@t3tools/shared/preview";
 import { decodeEnvironmentTools } from "@t3tools/shared/environmentTools";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -202,7 +206,8 @@ const make = Effect.gen(function* () {
   const probeFibers = yield* FiberMap.make<EnvironmentToolId>();
   const probeSlots = yield* Ref.make<ReadonlyMap<EnvironmentToolId, ProbeSlot>>(new Map());
   // A tool's page shows the tab this service opened, never a popup the tool's site opened beside it.
-  const browserTabs = yield* Ref.make<ReadonlyMap<EnvironmentToolId, string>>(new Map());
+  // Keyed by tool and runtime: desktop viewers and streamed viewers each keep their own tab.
+  const browserTabs = yield* Ref.make<ReadonlyMap<string, string>>(new Map());
 
   // Relative paths resolve against the home directory, where a fresh T3 terminal starts.
   const resolveCwd = (cwd: string | undefined) =>
@@ -266,25 +271,40 @@ const make = Effect.gen(function* () {
     input: EnvironmentToolOpenInput,
     definition: BrowserEnvironmentTool,
   ) {
-    if (!canHostBrowser) {
+    // The current definition decides: a client may ask from a target that has since changed.
+    const reachableFromClient = browserTargetReachableFromClient(definition.target);
+    const runtime = input.runtime === "desktop" && reachableFromClient ? "desktop" : "server";
+    const threadId = environmentToolThreadId(input.toolId);
+    const tabKey = `${input.toolId}:${runtime}`;
+    const { sessions } = yield* previewManager.list({ threadId });
+    // A tab without a runtime is a desktop tab. Once the target is host-only, desktop tabs left
+    // from an earlier target point at an address their clients can't reach.
+    const sessionsOf = (of: PreviewRuntime) =>
+      sessions.filter((session) => (session.runtime ?? "desktop") === of);
+    const runtimeSessions = sessionsOf(runtime);
+    const closing = [
+      ...(input.restart === true ? runtimeSessions : []),
+      ...(reachableFromClient ? [] : sessionsOf("desktop")),
+    ];
+    yield* Effect.forEach(
+      closing,
+      (session) => previewManager.close({ threadId, tabId: session.tabId }).pipe(Effect.orDie),
+      { discard: true },
+    );
+    if (runtime === "server" && !canHostBrowser) {
       return yield* new EnvironmentToolUnavailableError({
         toolId: input.toolId,
         reason: "This environment can't host a browser",
       });
     }
-    const threadId = environmentToolThreadId(input.toolId);
-    if (input.restart === true) {
-      yield* previewManager.close({ threadId }).pipe(Effect.orDie);
-    } else {
-      const tabId = (yield* Ref.get(browserTabs)).get(input.toolId);
-      const { sessions } = yield* previewManager.list({ threadId });
-      if (tabId !== undefined && sessions.some((session) => session.tabId === tabId)) {
+    if (input.restart !== true) {
+      const tabId = (yield* Ref.get(browserTabs)).get(tabKey);
+      if (tabId !== undefined && runtimeSessions.some((session) => session.tabId === tabId)) {
         return { kind: "browser", threadId, tabId } as const;
       }
     }
-    // Always the server runtime: an environment port is only reachable from the host.
     const opened = yield* previewManager
-      .open({ threadId, url: browserNavigationTargetUrl(definition.target), runtime: "server" })
+      .open({ threadId, url: browserNavigationTargetUrl(definition.target), runtime })
       .pipe(
         Effect.mapError(
           () =>
@@ -294,7 +314,7 @@ const make = Effect.gen(function* () {
             }),
         ),
       );
-    yield* Ref.update(browserTabs, (tabs) => new Map(tabs).set(input.toolId, opened.tabId));
+    yield* Ref.update(browserTabs, (tabs) => new Map(tabs).set(tabKey, opened.tabId));
     return { kind: "browser", threadId, tabId: opened.tabId } as const;
   });
 

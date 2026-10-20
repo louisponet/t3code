@@ -1,7 +1,11 @@
 "use client";
 
 import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
-import { AuthPreviewOperateScope, FILL_PREVIEW_VIEWPORT } from "@t3tools/contracts";
+import {
+  AuthPreviewOperateScope,
+  FILL_PREVIEW_VIEWPORT,
+  isEnvironmentToolThreadId,
+} from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import { type ComponentProps, useEffect, useMemo, useRef, useState } from "react";
 
@@ -19,6 +23,8 @@ import { readPreviewAnnotationTheme } from "./annotationTheme";
 import { useBrowserDefaults } from "./browserDefaults";
 import { useBrowserPointerStore } from "./browserPointerStore";
 import { HostedBrowserWebview } from "./HostedBrowserWebview";
+import { readLocalApi } from "~/localApi";
+import { useLaunchedToolTabs } from "./launchedToolTabs";
 import { openUrlInPreview } from "./openFileInPreview";
 import { rendersServerTabNatively } from "./previewRuntime";
 import { previewRuntimeTabId } from "./previewRuntimeTabId";
@@ -27,17 +33,13 @@ export function ElectronBrowserHost() {
   const { resolvedTheme } = useTheme();
   const previewByThreadKey = useActivePreviewSessions();
   const primaryEnvironmentId = useAtomValue(primaryEnvironmentIdAtom);
+  const launchedToolTabs = useLaunchedToolTabs((state) => state.keys);
   const sessions = useMemo(
     () =>
       Object.entries(previewByThreadKey).flatMap(([threadKey, previewState]) => {
         const threadRef = parseScopedThreadKey(threadKey);
         return threadRef
           ? Object.values(previewState.sessions)
-              .filter(
-                (snapshot) =>
-                  snapshot.runtime !== "server" ||
-                  rendersServerTabNatively(threadRef.environmentId, primaryEnvironmentId, snapshot),
-              )
               .map((snapshot) => ({
                 threadRef,
                 snapshot,
@@ -50,9 +52,19 @@ export function ElectronBrowserHost() {
                   previewState.desktopByTabId[snapshot.tabId]?.pictureInPicture ?? false,
                 zoomFactor: previewState.desktopByTabId[snapshot.tabId]?.zoomFactor ?? 1,
               }))
+              .filter(({ snapshot, runtimeTabId }) =>
+                snapshot.runtime === "server"
+                  ? rendersServerTabNatively(
+                      threadRef.environmentId,
+                      primaryEnvironmentId,
+                      snapshot,
+                    )
+                  : !isEnvironmentToolThreadId(threadRef.threadId) ||
+                    launchedToolTabs.has(runtimeTabId),
+              )
           : [];
       }),
-    [previewByThreadKey, primaryEnvironmentId],
+    [previewByThreadKey, primaryEnvironmentId, launchedToolTabs],
   );
 
   useEffect(() => {
@@ -109,6 +121,13 @@ export function ElectronBrowserHost() {
     return preview.onOpenLink(({ tabId, url, background }) => {
       const source = sessionByRuntimeTabId.current.get(tabId);
       if (!source) return;
+      // A tool's page shows only its own tab, so a new tab from it would never be seen.
+      if (isEnvironmentToolThreadId(source.threadRef.threadId)) {
+        void readLocalApi()
+          ?.shell.openExternal(url)
+          .catch(() => undefined);
+        return;
+      }
       void openUrlInPreview({
         threadRef: source.threadRef,
         url,

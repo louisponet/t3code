@@ -76,7 +76,10 @@ const fakePty = (pid: number): PtyAdapter.PtyProcess => {
   };
 };
 
-const makeHarness = (initialTools: Record<string, unknown>) =>
+const makeHarness = (
+  initialTools: Record<string, unknown>,
+  options: { readonly platform?: NodeJS.Platform } = {},
+) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -133,6 +136,9 @@ const makeHarness = (initialTools: Record<string, unknown>) =>
               streamChanges: Stream.never,
             }),
             Layer.succeed(HostProcess.HomeDirectory, home),
+            ...(options.platform === undefined
+              ? []
+              : [Layer.succeed(HostProcess.Platform, options.platform)]),
           ),
         ),
       ),
@@ -166,6 +172,11 @@ const DASHBOARD = {
   kind: "browser",
   name: "Grafana",
   target: { kind: "environment-port", port: 3000, path: "grafana" },
+};
+const PUBLIC_DASHBOARD = {
+  kind: "browser",
+  name: "Grafana",
+  target: { kind: "url", url: "https://grafana.example.com/d/home" },
 };
 const openLazygit = { toolId: LAZYGIT_ID, kind: "terminal" } as const;
 const openDashboard = { toolId: DASHBOARD_ID, kind: "browser" } as const;
@@ -433,6 +444,74 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("EnvironmentTools
         expect(tabIdOf(yield* environmentTools.open(openDashboard))).not.toBe(popup.tabId);
         const restarted = yield* environmentTools.open({ ...openDashboard, restart: true });
         expect(yield* environmentTools.open(openDashboard)).toEqual(restarted);
+      }).pipe(Effect.scoped),
+    );
+
+    it.effect("keeps a desktop tab beside the host's tab, and restarts only its own", () =>
+      Effect.gen(function* () {
+        const { environmentTools, previewManager } = yield* makeHarness({ dash: PUBLIC_DASHBOARD });
+        const threadId = environmentToolThreadId(DASHBOARD_ID);
+        const openOnDesktop = { ...openDashboard, runtime: "desktop" } as const;
+        const hostTab = tabIdOf(yield* environmentTools.open(openDashboard));
+        const desktopTab = tabIdOf(yield* environmentTools.open(openOnDesktop));
+        expect(desktopTab).not.toBe(hostTab);
+        expect(tabIdOf(yield* environmentTools.open(openOnDesktop))).toBe(desktopTab);
+        const runtimes = (yield* previewManager.list({ threadId })).sessions.map((session) => [
+          session.tabId,
+          session.runtime,
+        ]);
+        expect(runtimes).toEqual(
+          expect.arrayContaining([
+            [hostTab, "server"],
+            [desktopTab, "desktop"],
+          ]),
+        );
+
+        const restarted = tabIdOf(
+          yield* environmentTools.open({ ...openOnDesktop, restart: true }),
+        );
+        expect(restarted).not.toBe(desktopTab);
+        expect(tabIdOf(yield* environmentTools.open(openDashboard))).toBe(hostTab);
+      }).pipe(Effect.scoped),
+    );
+
+    it.effect("closes desktop tabs once the target becomes host-only", () =>
+      Effect.gen(function* () {
+        const { environmentTools, previewManager, setTools } = yield* makeHarness({
+          dash: PUBLIC_DASHBOARD,
+        });
+        const threadId = environmentToolThreadId(DASHBOARD_ID);
+        yield* environmentTools.open({ ...openDashboard, runtime: "desktop" });
+        yield* setTools({ dash: DASHBOARD });
+        yield* environmentTools.open({ ...openDashboard, runtime: "desktop" });
+        const { sessions } = yield* previewManager.list({ threadId });
+        expect(sessions.map((session) => session.runtime)).toEqual(["server"]);
+      }).pipe(Effect.scoped),
+    );
+
+    it.effect("opens desktop tabs where the host can't run a browser, and cleans them up", () =>
+      Effect.gen(function* () {
+        const { environmentTools, previewManager, setTools } = yield* makeHarness(
+          { dash: PUBLIC_DASHBOARD },
+          { platform: "freebsd" },
+        );
+        const threadId = environmentToolThreadId(DASHBOARD_ID);
+        yield* environmentTools.open({ ...openDashboard, runtime: "desktop" });
+        yield* setTools({ dash: DASHBOARD });
+        expect(
+          yield* environmentTools.open({ ...openDashboard, runtime: "desktop" }).pipe(Effect.flip),
+        ).toMatchObject({ _tag: "EnvironmentToolUnavailableError" });
+        expect((yield* previewManager.list({ threadId })).sessions).toEqual([]);
+      }).pipe(Effect.scoped),
+    );
+
+    it.effect("opens a host-only target in the host's browser whatever the client asks", () =>
+      Effect.gen(function* () {
+        const { environmentTools, previewManager } = yield* makeHarness({ dash: DASHBOARD });
+        const threadId = environmentToolThreadId(DASHBOARD_ID);
+        yield* environmentTools.open({ ...openDashboard, runtime: "desktop" });
+        const { sessions } = yield* previewManager.list({ threadId });
+        expect(sessions.map((session) => session.runtime)).toEqual(["server"]);
       }).pipe(Effect.scoped),
     );
   });

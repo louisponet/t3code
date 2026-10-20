@@ -8,7 +8,7 @@ import {
   ThreadId,
   TrimmedNonEmptyString,
 } from "./baseSchemas.ts";
-import { PreviewTabId } from "./preview.ts";
+import { PreviewRuntime, PreviewTabId } from "./preview.ts";
 import { BrowserNavigationTarget } from "./previewAutomation.ts";
 import { TerminalResizeInput } from "./terminal.ts";
 
@@ -192,6 +192,8 @@ export const EnvironmentToolOpenInput = Schema.Struct({
   cols: Schema.optional(TerminalResizeInput.fields.cols),
   rows: Schema.optional(TerminalResizeInput.fields.rows),
   restart: Schema.optional(Schema.Boolean),
+  /** Where a browser tool's tab renders; the server's browser when omitted. */
+  runtime: Schema.optional(PreviewRuntime),
 });
 export type EnvironmentToolOpenInput = typeof EnvironmentToolOpenInput.Type;
 

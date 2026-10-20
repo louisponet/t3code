@@ -2,14 +2,14 @@
 
 Tools put the dashboards you keep open next to your agents into the sidebar. A
 **terminal tool** runs a command such as `lazygit` or `htop` in a terminal. A
-**browser tool** opens a page, such as a dev server or Grafana, in the
-environment's browser. A **web app tool** renders an app on your device, including
+**browser tool** opens a page, such as a dev server or Grafana, in a browser.
+A **web app tool** renders an app on your device, including
 WebAssembly apps such as an egui dashboard. A tool can also show a small status badge, such as how
 many pull requests are waiting.
 
-Each tool belongs to one environment. Terminal and browser tools run on that
-environment's machine. Every device you connect sees the same running session,
-so you can start `lazygit` on your
+Each tool belongs to one environment. Terminal tools run on that environment's
+machine, and so do browser tools unless the desktop app opens them (see below).
+Every device sees the same terminal session, so you can start `lazygit` on your
 desktop and pick it up from a laptop or phone browser. The native mobile app does
 not show tools yet.
 
@@ -84,7 +84,14 @@ An entry T3 Code can't use is listed in **Settings → Tools** with the reason, 
 every other tool keeps working. "Needs a newer T3 Code" means the entry uses a
 kind this environment's version does not know.
 
-Browser tools use the environment's browser, so sign-ins persist between visits.
+When the desktop app connects to another machine's environment, a browser tool
+with a `url` target opens in the desktop app's own browser on your computer, with
+the desktop app's sign-ins. That session is separate from the one web clients
+see, and **Restart** restarts only the desktop's; **Stop** ends both. The address must resolve from
+your computer: for a server on the environment's machine, use an
+`environment-port` target. In web clients, in the desktop app's own
+environment, and for port or `localhost` targets, browser tools use the
+environment's browser, so sign-ins persist between visits.
 The first browser tab downloads a headless Chrome, and some Linux hosts need
 [browser setup](./remote-access.md#browser-host-setup). On a server without the
 desktop app, a browser tool left unwatched may close after a while; it reopens when

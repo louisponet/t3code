@@ -16,7 +16,7 @@ vi.mock("~/state/entities", () => ({
   useEnvironmentSupportsServerBrowser: () => false,
 }));
 
-import { alternatePreviewRuntime, previewRuntimeFor } from "./previewRuntime";
+import { alternatePreviewRuntime, browserToolRuntime, previewRuntimeFor } from "./previewRuntime";
 
 const local = "local" as EnvironmentId;
 const remote = "remote" as EnvironmentId;
@@ -56,5 +56,33 @@ describe("alternatePreviewRuntime", () => {
 
   it("offers no move outside the desktop app", () => {
     expect(alternatePreviewRuntime(remote, null, true, { runtime: "server" })).toBeNull();
+  });
+});
+
+describe("browserToolRuntime", () => {
+  it("renders a remote environment's reachable URL on this computer", () => {
+    state.desktop = true;
+    state.primary = local;
+
+    expect(browserToolRuntime(remote, { kind: "url", url: "overseer.example.com/ui" })).toBe(
+      "desktop",
+    );
+    expect(browserToolRuntime(remote, { kind: "url", url: "http://localhost:3000" })).toBe(
+      "server",
+    );
+    expect(browserToolRuntime(remote, { kind: "environment-port", port: 3000 })).toBe("server");
+  });
+
+  it("keeps the environment's browser where it already renders natively or is the only one", () => {
+    state.desktop = true;
+    state.primary = local;
+    expect(browserToolRuntime(local, { kind: "url", url: "https://grafana.example.com" })).toBe(
+      "server",
+    );
+
+    state.desktop = false;
+    expect(browserToolRuntime(remote, { kind: "url", url: "https://grafana.example.com" })).toBe(
+      "server",
+    );
   });
 });

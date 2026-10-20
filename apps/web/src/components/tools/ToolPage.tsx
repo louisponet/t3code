@@ -9,6 +9,7 @@ import {
 import { PencilIcon, RotateCwIcon, SquareIcon } from "lucide-react";
 import { useEffect, useEffectEvent, useState } from "react";
 
+import { browserToolRuntime } from "../../browser/previewRuntime";
 import { isElectron } from "../../env";
 import {
   environmentToolRowsAtom,
@@ -88,6 +89,8 @@ export function ToolPage({
   const tool = row !== null && (!row.offline || recovering) ? row.definition : null;
   if (viewShown !== (tool !== null)) setViewShown(tool !== null);
   const [webReloadEpoch, setWebReloadEpoch] = useState(0);
+  const browserRuntime =
+    tool?.kind === "browser" ? browserToolRuntime(environmentId, tool.target) : "server";
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none isolate">
@@ -140,7 +143,13 @@ export function ToolPage({
               connected={phase === "connected"}
             />
           ) : (
-            <ToolBrowserView environmentId={environmentId} toolId={toolId} toolName={tool.name} />
+            <ToolBrowserView
+              key={browserRuntime}
+              environmentId={environmentId}
+              toolId={toolId}
+              toolName={tool.name}
+              runtime={browserRuntime}
+            />
           )}
         </div>
       </div>

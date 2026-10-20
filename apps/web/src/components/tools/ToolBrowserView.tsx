@@ -9,9 +9,12 @@ import {
   isUnknownUnionMember,
   type EnvironmentId,
   type EnvironmentToolId,
+  type PreviewRuntime,
 } from "@t3tools/contracts";
 import { useEffect, useEffectEvent, useState, type ReactNode } from "react";
 
+import { markToolTabLaunched } from "../../browser/launchedToolTabs";
+import { previewRuntimeTabId } from "../../browser/previewRuntimeTabId";
 import { useThreadPreviewState } from "../../previewStateStore";
 import { environmentToolsEnvironment } from "../../state/environmentTools";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -24,15 +27,17 @@ interface OpenedTab {
   readonly id: string;
   /** The server epoch the tab was listed under; null until it is listed. */
   readonly epoch: string | null;
+  /** Where the server opened the tab, which may not be where the view asked. */
+  readonly runtime: PreviewRuntime | null;
 }
 
-/** The tool's tab always lives in the environment's browser, so a port target is the host's. */
 export function ToolBrowserView(props: {
   readonly environmentId: EnvironmentId;
   readonly toolId: EnvironmentToolId;
   readonly toolName: string;
+  readonly runtime: PreviewRuntime;
 }) {
-  const { environmentId, toolId } = props;
+  const { environmentId, toolId, runtime } = props;
   const canOpen = useAtomValue(
     environmentToolsEnvironment.open.permissionAtom(environmentId, { toolId, kind: "browser" }),
   );
@@ -43,24 +48,37 @@ export function ToolBrowserView(props: {
   const [tab, setTab] = useState<OpenedTab | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const listed = tab !== null && preview.sessions[tab.id] !== undefined;
-  if (tab !== null && tab.epoch === null && listed) setTab({ ...tab, epoch: preview.serverEpoch });
-  const gone = tab !== null && tab.epoch !== null && preview.listLoaded && !listed;
-  // Tab ids carry the server epoch: a tab lost to a server restart reopens. On the same server a
-  // tool restart, or a stop and start from any device, replaces the tab, so follow the thread's
+  const session = tab === null ? undefined : preview.sessions[tab.id];
+  // Desktop tab ids repeat across server restarts, so a listed tab takes the current epoch.
+  if (tab !== null && session !== undefined && tab.epoch !== preview.serverEpoch) {
+    setTab({ ...tab, epoch: preview.serverEpoch, runtime: session.runtime ?? "desktop" });
+  }
+  const gone = tab !== null && tab.epoch !== null && preview.listLoaded && session === undefined;
+  // A tab lost to a server restart reopens. On the same server a tool restart, or a stop and
+  // start from any device viewing the same runtime, replaces the tab, so follow that runtime's
   // remaining tab; with none left the tool was stopped and stays closed.
   const restarted = gone && preview.serverEpoch !== tab.epoch;
   const replacement =
     gone && !restarted
-      ? Object.values(preview.sessions).find((session) => session.runtime === "server")
+      ? Object.values(preview.sessions).find(
+          (candidate) => (candidate.runtime ?? "desktop") === tab.runtime,
+        )
       : undefined;
-  if (replacement !== undefined) setTab({ id: replacement.tabId, epoch: preview.serverEpoch });
+  if (tab !== null && replacement !== undefined) {
+    setTab({ ...tab, id: replacement.tabId, epoch: preview.serverEpoch });
+  }
+
+  const launchedKey =
+    tab === null || tab.epoch === null ? null : previewRuntimeTabId(threadRef, tab.epoch, tab.id);
+  useEffect(() => {
+    if (launchedKey !== null) markToolTabLaunched(launchedKey);
+  }, [launchedKey]);
 
   const launch = async () => {
-    const result = await open({ environmentId, input: { toolId, kind: "browser" } });
+    const result = await open({ environmentId, input: { toolId, kind: "browser", runtime } });
     if (result._tag === "Success") {
       if (!isUnknownUnionMember(result.value) && result.value.kind === "browser") {
-        setTab({ id: result.value.tabId, epoch: null });
+        setTab({ id: result.value.tabId, epoch: null, runtime: null });
         setError(null);
       }
       return;
@@ -104,10 +122,10 @@ export function ToolBrowserView(props: {
     );
   }
   // The first browser on a host can take a while: it downloads Chrome.
-  if (!listed) return <ToolViewMessage>Opening {props.toolName}…</ToolViewMessage>;
+  if (session === undefined) return <ToolViewMessage>Opening {props.toolName}…</ToolViewMessage>;
   return (
     <PreviewPanelShell mode="embedded">
-      <PreviewView threadRef={threadRef} tabId={tab.id} visible allowRuntimeMove={false} />
+      <PreviewView threadRef={threadRef} tabId={session.tabId} visible allowRuntimeMove={false} />
     </PreviewPanelShell>
   );
 }

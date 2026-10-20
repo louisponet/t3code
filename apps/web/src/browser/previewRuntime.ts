@@ -1,5 +1,11 @@
 import { useAtomValue } from "@effect/atom-react";
-import type { EnvironmentId, PreviewRuntime, PreviewSessionSnapshot } from "@t3tools/contracts";
+import type {
+  BrowserNavigationTarget,
+  EnvironmentId,
+  PreviewRuntime,
+  PreviewSessionSnapshot,
+} from "@t3tools/contracts";
+import { browserTargetReachableFromClient } from "@t3tools/shared/browserNavigationTarget";
 
 import { isElectron } from "~/env";
 import { isPreviewSupportedInRuntime } from "~/previewStateStore";
@@ -19,6 +25,22 @@ export function previewRuntimeFor(environmentId: EnvironmentId): PreviewRuntime 
     return undefined;
   }
   return "server";
+}
+
+/**
+ * The desktop app renders a remote environment's browser tool URL itself, at native speed and
+ * with its own logins; streaming that host's browser is bandwidth-bound. Its own environment's
+ * server tabs already render natively here.
+ */
+export function browserToolRuntime(
+  environmentId: EnvironmentId,
+  target: BrowserNavigationTarget,
+): PreviewRuntime {
+  return isPreviewSupportedInRuntime() &&
+    environmentId !== appAtomRegistry.get(primaryEnvironmentIdAtom) &&
+    browserTargetReachableFromClient(target)
+    ? "desktop"
+    : "server";
 }
 
 export function alternatePreviewRuntime(

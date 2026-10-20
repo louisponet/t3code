@@ -14,6 +14,7 @@ import { type ReactNode } from "react";
 import { getThreadSortTimestamp, sortThreads } from "../lib/threadSort";
 import { normalizeSearchText } from "../lib/utils";
 import { formatRelativeTimeLabel } from "../timestampFormat";
+import type { EnvironmentToolRow } from "../state/environmentTools.logic";
 import { type Project, type SidebarThreadSummary, type Thread } from "../types";
 
 export const RECENT_THREAD_LIMIT = 12;
@@ -567,11 +568,15 @@ export function getCommandPaletteMode(input: {
 
 export function buildRootGroups(input: {
   actionItems: ReadonlyArray<CommandPaletteActionItem | CommandPaletteSubmenuItem>;
+  toolItems?: ReadonlyArray<CommandPaletteActionItem>;
   recentThreadItems: ReadonlyArray<CommandPaletteActionItem>;
 }): CommandPaletteGroup[] {
   const groups: CommandPaletteGroup[] = [];
   if (input.actionItems.length > 0) {
     groups.push({ value: "actions", label: "Actions", items: input.actionItems });
+  }
+  if (input.toolItems && input.toolItems.length > 0) {
+    groups.push({ value: "tools", label: "Tools", items: input.toolItems });
   }
   if (input.recentThreadItems.length > 0) {
     groups.push({
@@ -594,4 +599,60 @@ export function getCommandPaletteInputPlaceholder(mode: CommandPaletteMode): str
     case "submenu-browse":
       return "Enter path (e.g. ~/projects/my-app)";
   }
+}
+
+export function buildToolActionItems(input: {
+  rows: ReadonlyArray<EnvironmentToolRow>;
+  labelById: ReadonlyMap<EnvironmentId, string>;
+  terminalIcon: ReactNode;
+  browserIcon: ReactNode;
+  /** `environmentLabel` is set only when another environment has a tool with the same name. */
+  renderDescription: (row: EnvironmentToolRow, environmentLabel: string | null) => ReactNode;
+  runTool: (row: EnvironmentToolRow) => Promise<void>;
+}): CommandPaletteActionItem[] {
+  const environmentsByName = new Map<string, Set<EnvironmentId>>();
+  for (const row of input.rows) {
+    const name = normalizeSearchText(row.definition.name);
+    environmentsByName.set(
+      name,
+      (environmentsByName.get(name) ?? new Set()).add(row.environmentId),
+    );
+  }
+  return input.rows.map((row) => {
+    const label = input.labelById.get(row.environmentId) ?? row.environmentId;
+    const ambiguous =
+      (environmentsByName.get(normalizeSearchText(row.definition.name))?.size ?? 0) > 1;
+    return {
+      kind: "action",
+      value: `tool:${row.environmentId}:${row.toolId}`,
+      searchTerms: [row.definition.name, row.toolId, label, row.definition.kind, "tool"],
+      title: row.definition.name,
+      description: input.renderDescription(row, ambiguous ? label : null),
+      icon: row.definition.kind === "terminal" ? input.terminalIcon : input.browserIcon,
+      shortcutCommand: `tool.${row.toolId}.open`,
+      run: () => input.runTool(row),
+    };
+  });
+}
+
+export function toolIdFromOpenCommand(command: KeybindingCommand | null): string | null {
+  return command !== null && command.startsWith("tool.") && command.endsWith(".open")
+    ? command.slice("tool.".length, -".open".length)
+    : null;
+}
+
+export type ToolOpenShortcutTarget =
+  | { readonly kind: "unique"; readonly row: EnvironmentToolRow }
+  | { readonly kind: "ambiguous" }
+  | { readonly kind: "missing" };
+
+/** Never guesses: an id that several environments define is left for the user to pick. */
+export function resolveToolOpenShortcut(
+  rows: ReadonlyArray<EnvironmentToolRow>,
+  toolId: string,
+): ToolOpenShortcutTarget {
+  const matches = rows.filter((row) => row.toolId === toolId);
+  const [first] = matches;
+  if (first === undefined) return { kind: "missing" };
+  return matches.length === 1 ? { kind: "unique", row: first } : { kind: "ambiguous" };
 }

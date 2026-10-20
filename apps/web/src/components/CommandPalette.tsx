@@ -66,6 +66,7 @@ import {
   FolderGit2Icon,
   FolderIcon,
   FolderPlusIcon,
+  GlobeIcon,
   MessageSquareDashedIcon,
   LinkIcon,
   MessageSquareIcon,
@@ -75,6 +76,7 @@ import {
   RotateCcwIcon,
   SettingsIcon,
   SquarePenIcon,
+  SquareTerminalIcon,
   SunIcon,
   TextSearchIcon,
 } from "lucide-react";
@@ -181,6 +183,7 @@ import {
   buildProjectActionItems,
   buildRootGroups,
   buildThreadActionItems,
+  buildToolActionItems,
   buildLinkedThreadActionItems,
   buildCommandPaletteRows,
   enumerateCommandPaletteItems,
@@ -197,7 +200,9 @@ import {
   ITEM_ICON_CLASS,
   RECENT_THREAD_LIMIT,
   reduceCommandPaletteUiState,
+  resolveToolOpenShortcut,
   type SearchOverlayMode,
+  toolIdFromOpenCommand,
 } from "./CommandPalette.logic";
 import { orderItemsByPreferredIds, sortLogicalProjectsForSidebar } from "./Sidebar.logic";
 import { resolveEnvironmentOptionLabel } from "./BranchToolbar.logic";
@@ -250,6 +255,14 @@ import type { Project } from "../types";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { readPullRequestListPreferences } from "~/components/pullRequest/pullRequestListPreferences";
 import { useThreadRouteTarget } from "../hooks/useThreadRouteTarget";
+import { appAtomRegistry } from "../rpc/atomRegistry";
+import {
+  environmentToolRowsAtom,
+  type EnvironmentToolRow,
+  useEnvironmentToolStatus,
+  useEnvironmentToolsEnvironmentIds,
+} from "../state/environmentTools";
+import { ToolEditorDialog } from "./tools/ToolEditorDialog";
 
 const EMPTY_BROWSE_ENTRIES: FilesystemBrowseResult["entries"] = [];
 
@@ -507,6 +520,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
   const openAddProject = () => dispatch({ _tag: "OpenAddProject" });
   const openNewThreadIn = () => dispatch({ _tag: "OpenNewThreadIn" });
   const clearOpenIntent = () => dispatch({ _tag: "ClearOpenIntent" });
+  const [toolEditorOpen, setToolEditorOpen] = useState(false);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { theme, themeHalves, resolvedTheme, appearanceMode, setAppearanceMode } = useTheme();
   const composerHandleRef = useRef<ChatComposerHandle | null>(null);
@@ -588,6 +602,32 @@ export function CommandPalette({ children }: { children: ReactNode }) {
         void navigate({ to: "/usage" });
         return;
       }
+      const toolId = toolIdFromOpenCommand(command);
+      if (toolId !== null) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.repeat) return;
+        const target = resolveToolOpenShortcut(
+          appAtomRegistry.get(environmentToolRowsAtom).rows,
+          toolId,
+        );
+        if (target.kind === "unique") {
+          setOpen(false);
+          void navigate({
+            to: "/tools/$environmentId/$toolId",
+            params: { environmentId: target.row.environmentId, toolId: target.row.toolId },
+          });
+        } else if (target.kind === "ambiguous") {
+          dispatch({ _tag: "OpenSearch", query: toolId });
+        } else {
+          toastManager.add({
+            type: "warning",
+            title: `No tool ${toolId}`,
+            description: "No environment defines this tool. Add it in Settings → Tools.",
+          });
+        }
+        return;
+      }
       const mode = overlayModeForCommand(command);
       if (mode === null) {
         return;
@@ -654,8 +694,10 @@ export function CommandPalette({ children }: { children: ReactNode }) {
           setOpen={setOpen}
           openOverlayMode={toggleMode}
           clearOpenIntent={clearOpenIntent}
+          openToolEditor={() => setToolEditorOpen(true)}
         />
       </CommandDialog>
+      <ToolEditorDialog open={toolEditorOpen} onOpenChange={setToolEditorOpen} />
     </ComposerHandleContext>
   );
 }
@@ -666,6 +708,7 @@ function CommandPaletteDialog(props: {
   readonly setOpen: (open: boolean) => void;
   readonly openOverlayMode: (mode: SearchOverlayMode) => void;
   readonly clearOpenIntent: () => void;
+  readonly openToolEditor: () => void;
 }) {
   const composerHandleRef = useComposerHandleContext();
 
@@ -700,6 +743,7 @@ function CommandPaletteDialog(props: {
           setOpen={props.setOpen}
           openOverlayMode={props.openOverlayMode}
           clearOpenIntent={props.clearOpenIntent}
+          openToolEditor={props.openToolEditor}
         />
       )}
     </CommandDialogPopup>
@@ -711,10 +755,11 @@ function OpenCommandPaletteDialog(props: {
   readonly setOpen: (open: boolean) => void;
   readonly openOverlayMode: (mode: SearchOverlayMode) => void;
   readonly clearOpenIntent: () => void;
+  readonly openToolEditor: () => void;
 }) {
   const navigate = useNavigate();
   const pathname = useLocation({ select: (location) => location.pathname });
-  const { clearOpenIntent, openIntent, openOverlayMode, setOpen } = props;
+  const { clearOpenIntent, openIntent, openOverlayMode, openToolEditor, setOpen } = props;
   const [query, setQuery] = useState(openIntent?.kind === "search" ? openIntent.query : "");
   const [linkedThreadSearch, setLinkedThreadSearch] = useState(
     openIntent?.kind === "search" ? openIntent : null,
@@ -753,6 +798,8 @@ function OpenCommandPaletteDialog(props: {
     reportFailure: false,
   });
   const { environments } = useEnvironments();
+  const toolRows = useAtomValue(environmentToolRowsAtom).rows;
+  const toolEnvironmentIds = useEnvironmentToolsEnvironmentIds();
   const desktopLocalBootstraps = useDesktopLocalBootstraps();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const availableSettingsSearchItems = useAvailableSettingsSearchItems();
@@ -1299,6 +1346,26 @@ function OpenCommandPaletteDialog(props: {
     },
   });
   const recentThreadItems = allThreadItems.slice(0, RECENT_THREAD_LIMIT);
+  const toolItems = buildToolActionItems({
+    rows: toolRows,
+    labelById: new Map(
+      environments.map((environment) => [environment.environmentId, environment.label] as const),
+    ),
+    terminalIcon: <SquareTerminalIcon className={ITEM_ICON_CLASS} />,
+    browserIcon: <GlobeIcon className={ITEM_ICON_CLASS} />,
+    renderDescription: (row, environmentLabel) =>
+      row.offline ? (
+        [environmentLabel, "Offline"].filter(Boolean).join(" · ")
+      ) : (
+        <ToolPaletteDescription row={row} environmentLabel={environmentLabel} />
+      ),
+    runTool: async (row) => {
+      await navigate({
+        to: "/tools/$environmentId/$toolId",
+        params: { environmentId: row.environmentId, toolId: row.toolId },
+      });
+    },
+  });
 
   // Stable so the item builders that capture it during render never see the
   // highlight ref it writes.
@@ -2063,6 +2130,29 @@ function OpenCommandPaletteDialog(props: {
     },
   });
 
+  if (toolEnvironmentIds.length > 0) {
+    actionItems.push({
+      kind: "action",
+      value: "action:add-tool",
+      searchTerms: ["add tool", "new tool", "terminal", "browser", "dashboard", "tui"],
+      title: "Add tool…",
+      icon: <SquareTerminalIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        openToolEditor();
+      },
+    });
+    actionItems.push({
+      kind: "action",
+      value: "action:tool-settings",
+      searchTerms: ["tool settings", "tools", "manage tools", "status badge", "probe"],
+      title: "Tool settings",
+      icon: <SettingsIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        await navigate({ to: "/settings/tools" });
+      },
+    });
+  }
+
   actionItems.push({
     kind: "action",
     value: "action:settings",
@@ -2111,7 +2201,7 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
-  const rootGroups = buildRootGroups({ actionItems, recentThreadItems });
+  const rootGroups = buildRootGroups({ actionItems, toolItems, recentThreadItems });
   const settingsSearchItems: CommandPaletteActionItem[] = searchSettings(
     deferredQuery,
     availableSettingsSearchItems,
@@ -3405,4 +3495,18 @@ function ProjectSearchDescription(props: {
   }
 
   return <span className="truncate">{props.environmentLabels.join(" · ")}</span>;
+}
+
+function ToolPaletteDescription(props: {
+  readonly row: EnvironmentToolRow;
+  readonly environmentLabel: string | null;
+}) {
+  const status = useEnvironmentToolStatus(props.row.environmentId, props.row.toolId);
+  const badge =
+    status?.state === "ready"
+      ? status.badge
+      : status?.state === "unavailable"
+        ? status.lastBadge
+        : undefined;
+  return [props.environmentLabel, badge?.headline].filter(Boolean).join(" · ") || null;
 }

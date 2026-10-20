@@ -317,6 +317,26 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     }).pipe(Effect.provide(layerKeybindings())),
   );
 
+  it.effect("gives existing configs the tool focus escape to the command palette", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      const keybindings = yield* Keybindings.Keybindings;
+      const existing = {
+        key: "mod+k",
+        command: "commandPalette.toggle",
+        when: "!terminalFocus",
+      } as const;
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [existing]);
+
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.deepStrictEqual(
+        persisted.filter((entry) => entry.command === "commandPalette.toggle"),
+        [{ key: "mod+shift+k", command: "commandPalette.toggle", when: "toolFocus" }, existing],
+      );
+    }).pipe(Effect.provide(layerKeybindings())),
+  );
+
   it.effect("leaves a customized command without the late default", () =>
     Effect.gen(function* () {
       const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;

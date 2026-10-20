@@ -57,6 +57,7 @@ import {
 } from "@t3tools/contracts";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
+  AppWindowIcon,
   ArrowLeftIcon,
   ChartNoAxesColumnIcon,
   CheckIcon,
@@ -1353,6 +1354,7 @@ function OpenCommandPaletteDialog(props: {
     ),
     terminalIcon: <SquareTerminalIcon className={ITEM_ICON_CLASS} />,
     browserIcon: <GlobeIcon className={ITEM_ICON_CLASS} />,
+    webIcon: <AppWindowIcon className={ITEM_ICON_CLASS} />,
     renderDescription: (row, environmentLabel) =>
       row.offline ? (
         [environmentLabel, "Offline"].filter(Boolean).join(" · ")

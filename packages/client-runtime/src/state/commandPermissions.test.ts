@@ -272,10 +272,12 @@ it.effect("guards opening and stopping a tool by the kind it opens", () =>
       const toolId = EnvironmentToolId.make("dash");
       for (const method of [WS_METHODS.environmentToolsOpen, WS_METHODS.environmentToolsStop]) {
         const command = createCommandPermissions(runtime, method);
-        const browser = { toolId, kind: "browser" };
+        for (const kind of ["browser", "web"]) {
+          const input = { toolId, kind };
+          expect(registry.get(command.permissionAtom(env, input))).toBe(true);
+          yield* command.authorize(registry, env, input);
+        }
         const terminal = { toolId, kind: "terminal" };
-        expect(registry.get(command.permissionAtom(env, browser))).toBe(true);
-        yield* command.authorize(registry, env, browser);
         expect(registry.get(command.permissionAtom(env, terminal))).toBe(false);
         expect(
           (yield* command.authorize(registry, env, terminal).pipe(Effect.flip)).requiredPermission,

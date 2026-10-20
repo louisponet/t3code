@@ -20,6 +20,7 @@ describe("decodeEnvironmentTools", () => {
       sim: { kind: "simulator", name: "iPhone" },
       btop: { kind: "terminal", name: "btop" },
       grafana: { kind: "browser", name: "Grafana", target: { kind: "url", url: "https://g.dev" } },
+      overseer: { kind: "web", name: "Overseer", target: { kind: "environment-port", port: 9877 } },
       slow: {
         kind: "terminal",
         name: "slow",
@@ -28,7 +29,7 @@ describe("decodeEnvironmentTools", () => {
       },
     });
 
-    expect(decoded.tools.map((tool) => tool.id)).toEqual(["lazygit", "grafana"]);
+    expect(decoded.tools.map((tool) => tool.id)).toEqual(["lazygit", "grafana", "overseer"]);
     expect(decoded.tools[1]?.definition).toEqual({
       kind: "browser",
       name: "Grafana",
@@ -44,7 +45,7 @@ describe("decodeEnvironmentTools", () => {
   it("names the problem when an entry is not a tool at all", () => {
     expect(decodeEnvironmentTools({ a: "btop", b: { name: "btop" } }).issues).toEqual([
       { key: "a", message: "Expected an object" },
-      { key: "b", message: 'kind: Expected "terminal" or "browser"' },
+      { key: "b", message: 'kind: Expected "terminal" or "browser" or "web"' },
     ]);
   });
 });

@@ -19,9 +19,11 @@ import {
   type ServerSettings as ServerSettingsValue,
   type TerminalEnvironmentTool,
   type TerminalError,
+  type WebEnvironmentTool,
 } from "@t3tools/contracts";
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import { browserNavigationTargetUrl } from "@t3tools/shared/browserNavigationTarget";
+import { normalizePreviewUrl } from "@t3tools/shared/preview";
 import { decodeEnvironmentTools } from "@t3tools/shared/environmentTools";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
@@ -42,6 +44,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 
+import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import * as PreviewManager from "../preview/Manager.ts";
 import { previewBrowserRelease } from "../preview/PreviewBrowser.ts";
@@ -49,6 +52,7 @@ import * as ProcessRunner from "../processRunner.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
 import { runEnvironmentToolProbe, type EnvironmentToolProbeOutcome } from "./probe.ts";
+import { issueToolAppUrl, toolAppConfigHash } from "./ToolAppAccess.ts";
 
 export class EnvironmentTools extends Context.Service<
   EnvironmentTools,
@@ -58,6 +62,11 @@ export class EnvironmentTools extends Context.Service<
       input: EnvironmentToolOpenInput,
     ) => Effect.Effect<EnvironmentToolOpenResult, EnvironmentToolError>;
     readonly stop: (input: EnvironmentToolStopInput) => Effect.Effect<void, EnvironmentToolError>;
+    /** The upstream a web tool's proxy forwards to, from its current definition. */
+    readonly webTargetUrl: (
+      toolId: EnvironmentToolId,
+      configHash: string,
+    ) => Effect.Effect<string | null>;
     /** Runs the tool's status probe now, or waits for the run already in flight. */
     readonly refreshStatus: (
       toolId: EnvironmentToolId,
@@ -116,6 +125,15 @@ function toolsStateOf(
   return { definitions, sessionKinds };
 }
 
+/** A web tool's upstream as the proxy dials it: schemeless targets get a scheme, as in preview. */
+function webUpstreamUrl(definition: WebEnvironmentTool): URL | null {
+  try {
+    return new URL(normalizePreviewUrl(browserNavigationTargetUrl(definition.target)));
+  } catch {
+    return null;
+  }
+}
+
 function terminalOpenFailure(error: TerminalError): string {
   switch (error._tag) {
     case "TerminalCwdNotFoundError":
@@ -161,6 +179,7 @@ const make = Effect.gen(function* () {
   const previewManager = yield* PreviewManager.PreviewManager;
   const backgroundPolicy = yield* BackgroundPolicy.BackgroundPolicy;
   const processRunner = yield* ProcessRunner.ProcessRunner;
+  const secretStore = yield* ServerSecretStore.ServerSecretStore;
   const path = yield* Path.Path;
   const home = yield* HostProcess.HomeDirectory;
   const canHostBrowser =
@@ -279,24 +298,61 @@ const make = Effect.gen(function* () {
     return { kind: "browser", threadId, tabId: opened.tabId } as const;
   });
 
+  const openWeb = Effect.fn("EnvironmentTools.openWeb")(function* (
+    input: EnvironmentToolOpenInput,
+    definition: WebEnvironmentTool,
+  ) {
+    // Nothing starts on the host: opening mints the signed proxy path the client's frame
+    // loads. The target's own query and fragment ride along, since apps read them.
+    const target = webUpstreamUrl(definition);
+    const issued =
+      target === null
+        ? null
+        : yield* issueToolAppUrl(input.toolId, definition).pipe(
+            Effect.provideService(ServerSecretStore.ServerSecretStore, secretStore),
+          );
+    if (target === null || issued === null) {
+      return yield* new EnvironmentToolUnavailableError({
+        toolId: input.toolId,
+        reason: "The tool's address can't be opened as a web app",
+      });
+    }
+    return {
+      kind: "web",
+      relativeUrl: `${issued.relativeUrl}${target.search}${target.hash}`,
+      expiresAt: issued.expiresAt,
+    } as const;
+  });
+
   const open: EnvironmentTools["Service"]["open"] = (input) =>
     locks.withLock(
       input.toolId,
       Effect.gen(function* () {
         const definition = yield* findDefinition(input.toolId, input.kind);
-        return definition.kind === "terminal"
-          ? yield* openTerminal(input, definition)
-          : yield* openBrowser(input, definition);
+        switch (definition.kind) {
+          case "terminal":
+            return yield* openTerminal(input, definition);
+          case "browser":
+            return yield* openBrowser(input, definition);
+          case "web":
+            return yield* openWeb(input, definition);
+        }
       }),
     );
 
   const closeSessions = (toolId: EnvironmentToolId, kind: EnvironmentToolKind) => {
     const threadId = environmentToolThreadId(toolId);
-    return kind === "terminal"
-      ? terminalManager
+    switch (kind) {
+      case "terminal":
+        return terminalManager
           .close({ threadId, terminalId: ENVIRONMENT_TOOL_TERMINAL_ID, deleteHistory: true })
-          .pipe(Effect.orDie)
-      : previewManager.close({ threadId }).pipe(Effect.orDie);
+          .pipe(Effect.orDie);
+      case "browser":
+        return previewManager.close({ threadId }).pipe(Effect.orDie);
+      case "web":
+        // Web tools hold no host session; leaving the page is the whole close.
+        return Effect.void;
+    }
   };
 
   const stop: EnvironmentTools["Service"]["stop"] = (input) =>
@@ -472,6 +528,14 @@ const make = Effect.gen(function* () {
     Effect.forkScoped,
   );
 
+  const webTargetUrl: EnvironmentTools["Service"]["webTargetUrl"] = (toolId, configHash) =>
+    Effect.map(currentDefinitions, (definitions) => {
+      const definition = definitions.get(toolId);
+      return definition?.kind === "web" && toolAppConfigHash(definition) === configHash
+        ? (webUpstreamUrl(definition)?.href ?? null)
+        : null;
+    });
+
   const refreshStatus: EnvironmentTools["Service"]["refreshStatus"] = (toolId) =>
     Effect.gen(function* () {
       if (!(yield* currentDefinitions).has(toolId)) {
@@ -508,6 +572,7 @@ const make = Effect.gen(function* () {
   return EnvironmentTools.of({
     open,
     stop,
+    webTargetUrl,
     refreshStatus,
     statuses: Ref.get(statusesRef),
     streamStatus,

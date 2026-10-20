@@ -6,6 +6,7 @@ import {
   EnvironmentToolBadge,
   EnvironmentToolDefinition,
   EnvironmentToolId,
+  EnvironmentToolOpenResult,
   EnvironmentToolStatus,
   EnvironmentToolStatusEvent,
   environmentToolThreadId,
@@ -41,6 +42,20 @@ describe("EnvironmentToolDefinition", () => {
       target: { kind: "environment-port", port: 3000, path: "/d/main" },
       status: { command: "gtc prs --badge", intervalSeconds: 120 },
     });
+  });
+
+  it("accepts web apps in settings with a host port or a URL", () => {
+    for (const target of [
+      { kind: "environment-port", port: 9877, path: "/ui/" },
+      { kind: "url", url: "http://dashboard.internal/ui/" },
+    ]) {
+      const tool = { kind: "web", name: "Overseer", target };
+      expect(decodeDefinition(tool)).toEqual(tool);
+      expect(decodePatch({ tools: { overseer: tool } }).tools).toEqual({ overseer: tool });
+      expect(encodePatch(decodePatch({ tools: { overseer: tool } }))).toEqual({
+        tools: { overseer: tool },
+      });
+    }
   });
 
   it("rejects a kind this build does not know and out-of-range probe settings", () => {
@@ -148,5 +163,20 @@ describe("status wire types", () => {
     expect(() =>
       decodeStatus({ state: "unavailable", reason: "x".repeat(201), since: "" }),
     ).toThrow();
+  });
+});
+
+describe("EnvironmentToolOpenResult", () => {
+  const decodeOpen = Schema.decodeUnknownSync(EnvironmentToolOpenResult);
+
+  it("decodes a web app proxy URL without a thread or browser session", () => {
+    const opened = {
+      kind: "web",
+      relativeUrl: "/api/tool-app/signed-token/?view=main#dashboard",
+      expiresAt: 1_800_000_000_000,
+    };
+    expect(decodeOpen(opened)).toEqual(opened);
+    expect(isUnknownUnionMember(decodeOpen({ kind: "native" }))).toBe(true);
+    expect(() => decodeOpen({ kind: "web", relativeUrl: opened.relativeUrl })).toThrow();
   });
 });

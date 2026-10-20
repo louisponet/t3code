@@ -6,7 +6,7 @@ import {
   resolveEnvironmentMachineKind,
 } from "@t3tools/contracts";
 import { browserNavigationTargetUrl } from "@t3tools/shared/browserNavigationTarget";
-import { GlobeIcon, PlusIcon, SquareTerminalIcon } from "lucide-react";
+import { AppWindowIcon, GlobeIcon, PlusIcon, SquareTerminalIcon } from "lucide-react";
 import { useState } from "react";
 
 import {
@@ -184,7 +184,12 @@ function ToolSettingsRow(props: {
   readonly onEdit: () => void;
 }) {
   const { definition } = props.row;
-  const Icon = definition.kind === "terminal" ? SquareTerminalIcon : GlobeIcon;
+  const Icon =
+    definition.kind === "terminal"
+      ? SquareTerminalIcon
+      : definition.kind === "web"
+        ? AppWindowIcon
+        : GlobeIcon;
   return (
     <SettingsRow
       title={

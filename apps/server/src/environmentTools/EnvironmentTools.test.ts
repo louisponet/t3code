@@ -5,6 +5,7 @@ import {
   DEFAULT_SERVER_SETTINGS,
   EnvironmentToolId,
   environmentToolThreadId,
+  isUnknownUnionMember,
   type EnvironmentToolOpenResult,
   type EnvironmentToolStatusEvent,
   type ServerSettings,
@@ -28,11 +29,13 @@ import { ChildProcessSpawner } from "effect/process";
 import { describe, expect } from "vite-plus/test";
 
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
+import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as PreviewManager from "../preview/Manager.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import * as ServerSettingsService from "../serverSettings.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
 import * as EnvironmentTools from "./EnvironmentTools.ts";
+import { validateToolAppToken } from "./ToolAppAccess.ts";
 
 interface ProbeCall {
   readonly input: ProcessRunner.ProcessRunInput;
@@ -107,6 +110,9 @@ const makeHarness = (initialTools: Record<string, unknown>) =>
     });
     const settingsFileTrusted = yield* Ref.make(true);
     const settingsChanges = yield* PubSub.unbounded<ServerSettings>();
+    const secretLayer = Layer.mock(ServerSecretStore.ServerSecretStore)({
+      getOrCreateRandom: () => Effect.succeed(new Uint8Array(32).fill(42)),
+    });
     const context = yield* Layer.build(
       EnvironmentTools.layer.pipe(
         Layer.provide(
@@ -114,6 +120,7 @@ const makeHarness = (initialTools: Record<string, unknown>) =>
             Layer.succeed(TerminalManager.TerminalManager, terminalManager),
             Layer.succeed(PreviewManager.PreviewManager, previewManager),
             Layer.succeed(ProcessRunner.ProcessRunner, processRunner),
+            secretLayer,
             Layer.mock(ServerSettingsService.ServerSettingsService)({
               getSettings: Ref.get(settings),
               settingsFileTrusted: Ref.get(settingsFileTrusted),
@@ -137,6 +144,8 @@ const makeHarness = (initialTools: Record<string, unknown>) =>
       probeCalls,
       terminalManager,
       previewManager,
+      validateToken: (token: string) =>
+        validateToolAppToken(token).pipe(Effect.provide(secretLayer)),
       setTools: (tools: Record<string, unknown>) =>
         Ref.set(settingsFileTrusted, true).pipe(
           Effect.andThen(Ref.updateAndGet(settings, (current) => ({ ...current, tools }))),
@@ -182,6 +191,60 @@ const watchStatus = (environmentTools: EnvironmentTools.EnvironmentTools["Servic
 
 it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("EnvironmentTools", (it) => {
   describe("sessions", () => {
+    it.effect(
+      "opens web tools without a host session and binds access to their configuration",
+      () =>
+        Effect.gen(function* () {
+          const web = { ...DASHBOARD, kind: "web" };
+          const { environmentTools, spawns, previewManager, validateToken, setTools } =
+            yield* makeHarness({ dash: web });
+          const opened = yield* environmentTools.open({ toolId: DASHBOARD_ID, kind: "web" });
+          if (isUnknownUnionMember(opened) || opened.kind !== "web")
+            return assert.fail("expected a web tool");
+          const token = opened.relativeUrl.split("/")[3]!;
+          const claims = yield* validateToken(token);
+          if (claims === null) return assert.fail("expected valid access");
+          expect(yield* environmentTools.webTargetUrl(claims.toolId, claims.configHash)).toBe(
+            "http://localhost:3000/grafana",
+          );
+          expect(spawns).toEqual([]);
+          expect(
+            (yield* previewManager.list({ threadId: environmentToolThreadId(DASHBOARD_ID) }))
+              .sessions,
+          ).toEqual([]);
+          yield* environmentTools.stop({ toolId: DASHBOARD_ID, kind: "web" });
+          yield* setTools({ dash: { ...web, name: "Renamed", status: { command: "true" } } });
+          expect(yield* environmentTools.webTargetUrl(claims.toolId, claims.configHash)).toBe(
+            "http://localhost:3000/grafana",
+          );
+          yield* setTools({ dash: { ...web, target: { kind: "environment-port", port: 4000 } } });
+          expect(yield* environmentTools.webTargetUrl(claims.toolId, claims.configHash)).toBeNull();
+          yield* setTools({});
+          expect(yield* environmentTools.webTargetUrl(claims.toolId, claims.configHash)).toBeNull();
+        }).pipe(Effect.scoped),
+    );
+
+    it.effect("preserves a web target's query and fragment, and rejects expired access", () =>
+      Effect.gen(function* () {
+        const { environmentTools, validateToken } = yield* makeHarness({
+          dash: {
+            kind: "web",
+            name: "Dashboard",
+            target: { kind: "url", url: "http://localhost:3000/index.html?theme=dark#chart" },
+          },
+        });
+        const opened = yield* environmentTools.open({ toolId: DASHBOARD_ID, kind: "web" });
+        if (isUnknownUnionMember(opened) || opened.kind !== "web")
+          return assert.fail("expected a web tool");
+        expect(opened.relativeUrl).toMatch(/\/\?theme=dark#chart$/);
+        const token = opened.relativeUrl.split("/")[3]!;
+        expect(yield* validateToken(`${token}.extra`)).toBeNull();
+        expect(yield* validateToken(`${token.slice(0, -1)}x`)).toBeNull();
+        yield* TestClock.adjust("12 hours");
+        expect(yield* validateToken(token)).toBeNull();
+      }).pipe(Effect.scoped),
+    );
+
     it.effect("concurrent opens share one PTY and one server tab on the host's localhost", () =>
       Effect.gen(function* () {
         const { environmentTools, spawns, previewManager } = yield* makeHarness({

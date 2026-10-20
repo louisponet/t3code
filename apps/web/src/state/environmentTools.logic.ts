@@ -27,6 +27,8 @@ export interface EnvironmentToolRows {
 export interface EnvironmentToolsSource {
   readonly environmentId: EnvironmentId;
   readonly offline: boolean;
+  /** Whether the environment can proxy web tools; older servers cannot. */
+  readonly webApps: boolean;
   readonly tools: Readonly<Record<string, unknown>>;
 }
 
@@ -46,9 +48,14 @@ export function buildEnvironmentToolRows(
   );
   const rows: Array<EnvironmentToolRow> = [];
   const issues = new Map<EnvironmentId, ReadonlyArray<EnvironmentToolIssue>>();
-  for (const { environmentId, offline, tools } of sources) {
+  for (const { environmentId, offline, webApps, tools } of sources) {
     const decoded = decodeEnvironmentTools(tools);
+    const sourceIssues: Array<EnvironmentToolIssue> = [...decoded.issues];
     for (const { id, definition } of decoded.tools) {
+      if (definition.kind === "web" && !webApps) {
+        sourceIssues.push({ key: id, message: "Needs a newer T3 Code" });
+        continue;
+      }
       const prior = previousRows.get(environmentToolRowKey(environmentId, id));
       rows.push(
         prior !== undefined &&
@@ -58,11 +65,11 @@ export function buildEnvironmentToolRows(
           : { environmentId, toolId: id, definition, offline },
       );
     }
-    if (!offline && decoded.issues.length > 0) {
+    if (!offline && sourceIssues.length > 0) {
       const prior = previous?.issues.get(environmentId);
       issues.set(
         environmentId,
-        prior !== undefined && Equal.equals(prior, decoded.issues) ? prior : decoded.issues,
+        prior !== undefined && Equal.equals(prior, sourceIssues) ? prior : sourceIssues,
       );
     }
   }

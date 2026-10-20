@@ -49,10 +49,7 @@ export function useRemoveEnvironmentTool() {
   const updateSettings = useAtomCommand(serverEnvironment.updateSettings, "tool removal");
   return async (environmentId: EnvironmentId, key: string, name: string): Promise<boolean> => {
     if (!readEnvironmentScope(environmentId, AuthSettingsWriteScope)) return false;
-    const confirmed = await requestConfirmDialog(
-      `Remove ${name}?\nIts terminal or browser tab closes on every device.`,
-      { variant: "destructive" },
-    );
+    const confirmed = await requestConfirmDialog(`Remove ${name}?`, { variant: "destructive" });
     if (confirmed !== true) return false;
     const result = await updateSettings({
       environmentId,
@@ -119,7 +116,9 @@ function ToolEditorForm(props: {
   const [kind, setKind] = useState<EnvironmentToolKind>(existing?.kind ?? "terminal");
   const [command, setCommand] = useState(existing?.kind === "terminal" ? existing.command : "");
   const [cwd, setCwd] = useState(existing?.kind === "terminal" ? (existing.cwd ?? "") : "");
-  const target = existing?.kind === "browser" ? existing.target : null;
+  const target = existing?.kind === "browser" || existing?.kind === "web" ? existing.target : null;
+  const webAppsCapable =
+    environment?.serverConfig?.environment.capabilities.environmentToolWebApps === true;
   const [targetKind, setTargetKind] = useState(target?.kind ?? "url");
   const [url, setUrl] = useState(target?.kind === "url" ? target.url : "");
   const [port, setPort] = useState(target?.kind === "environment-port" ? String(target.port) : "");
@@ -142,10 +141,11 @@ function ToolEditorForm(props: {
   const toolId = props.toolId ?? slugEnvironmentToolId(name, takenIds);
   const missing = editing && existing === null;
   const disabled = saving || !canWrite || environmentId === null || missing;
+  const unsupportedWebApp = kind === "web" && !webAppsCapable;
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (disabled || environmentId === null) return;
+    if (disabled || unsupportedWebApp || environmentId === null) return;
     if (!readEnvironmentScope(environmentId, AuthSettingsWriteScope)) {
       setError("This connection cannot change tools.");
       return;
@@ -211,7 +211,9 @@ function ToolEditorForm(props: {
       <DialogHeader>
         <DialogTitle>{editing ? `Edit ${existing?.name ?? props.toolId}` : "Add tool"}</DialogTitle>
         <DialogDescription>
-          Tools run on {environmentLabel} and open as a page from the sidebar.
+          {kind === "web"
+            ? `Web apps open on this device. Ports connect to ${environmentLabel}.`
+            : `Tools run on ${environmentLabel} and open as a page from the sidebar.`}
         </DialogDescription>
       </DialogHeader>
       <DialogPanel>
@@ -290,12 +292,18 @@ function ToolEditorForm(props: {
               value={[kind]}
               onValueChange={(values) => {
                 const next = values[0];
-                if (next === "terminal" || next === "browser") setKind(next);
+                if (next === "terminal" || next === "browser" || next === "web") setKind(next);
               }}
             >
               <Toggle value="terminal">Terminal</Toggle>
               <Toggle value="browser">Browser</Toggle>
+              {webAppsCapable || kind === "web" ? <Toggle value="web">Web app</Toggle> : null}
             </ToggleGroup>
+            {unsupportedWebApp ? (
+              <p className="text-sm text-destructive-foreground" role="status">
+                {environmentLabel} needs a newer T3 Code to run web apps.
+              </p>
+            ) : null}
             {kind === "terminal" ? (
               <>
                 <Field label="Command" htmlFor="tool-command">
@@ -318,7 +326,7 @@ function ToolEditorForm(props: {
             ) : (
               <>
                 <ToggleGroup
-                  aria-label="Browser target"
+                  aria-label={kind === "web" ? "Web app target" : "Browser target"}
                   value={[targetKind]}
                   onValueChange={(values) => {
                     const next = values[0];
@@ -439,7 +447,7 @@ function ToolEditorForm(props: {
         <Button type="button" variant="outline" onClick={props.onClose}>
           Cancel
         </Button>
-        <Button form={formId} type="submit" disabled={disabled}>
+        <Button form={formId} type="submit" disabled={disabled || unsupportedWebApp}>
           {saving ? "Saving…" : editing ? "Save changes" : "Add tool"}
         </Button>
       </DialogFooter>

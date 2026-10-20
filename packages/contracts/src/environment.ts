@@ -151,6 +151,9 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   serverBrowser: Schema.optionalKey(Schema.Boolean),
   /** Older servers strip the unknown `tools` settings key, so clients offer tools only here. */
   environmentTools: Schema.optionalKey(Schema.Boolean),
+  /** Server proxies `web` tools to clients. Absent on servers that only know terminal and
+      browser tools, where a web tool's kind would fail the open call instead. */
+  environmentToolWebApps: Schema.optionalKey(Schema.Boolean),
 });
 export type ExecutionEnvironmentCapabilities = typeof ExecutionEnvironmentCapabilities.Type;
 

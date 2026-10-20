@@ -94,14 +94,26 @@ export const BrowserEnvironmentTool = Schema.Struct({
 });
 export type BrowserEnvironmentTool = typeof BrowserEnvironmentTool.Type;
 
+/**
+ * A web app renders in the client's own frame, unlike a browser tool, which renders in the
+ * environment's browser. The server only proxies the target's bytes to the client.
+ */
+export const WebEnvironmentTool = Schema.Struct({
+  kind: Schema.Literal("web"),
+  ...environmentToolFields,
+  target: BrowserNavigationTarget,
+});
+export type WebEnvironmentTool = typeof WebEnvironmentTool.Type;
+
 /** Strict on purpose: every write path must fail loudly on a kind this build does not know. */
 export const EnvironmentToolDefinition = Schema.Union([
   TerminalEnvironmentTool,
   BrowserEnvironmentTool,
+  WebEnvironmentTool,
 ]);
 export type EnvironmentToolDefinition = typeof EnvironmentToolDefinition.Type;
 
-export const EnvironmentToolKind = Schema.Literals(["terminal", "browser"]);
+export const EnvironmentToolKind = Schema.Literals(["terminal", "browser", "web"]);
 export type EnvironmentToolKind = typeof EnvironmentToolKind.Type;
 
 export const MAX_ENVIRONMENT_TOOL_BADGE_HEADLINE_LENGTH = 60;
@@ -194,6 +206,12 @@ export const EnvironmentToolOpenResult = ForwardCompatibleUnion(
       kind: Schema.Literal("browser"),
       threadId: ThreadId,
       tabId: PreviewTabId,
+    }),
+    Schema.Struct({
+      kind: Schema.Literal("web"),
+      /** Signed proxy path on this environment's origin; resolve it against its HTTP base. */
+      relativeUrl: TrimmedNonEmptyString.check(Schema.isMaxLength(4096)),
+      expiresAt: Schema.Number,
     }),
   ],
   "kind",

@@ -6,7 +6,7 @@ import compression from "compression";
 import { playwright } from "vite-plus/test/browser-playwright";
 import { defineProject, type TestProjectInlineConfiguration } from "vite-plus/test/config";
 import "vite-plus/test/config";
-import { defineConfig, type Connect, type Plugin } from "vite-plus";
+import { defaultAllowedOrigins, defineConfig, type Connect, type Plugin } from "vite-plus";
 import * as Hash from "effect/Hash";
 import pkg from "./package.json" with { type: "json" };
 
@@ -229,6 +229,13 @@ export default defineConfig(() => {
       port,
       strictPort: true,
       allowedHosts,
+      cors: {
+        origin(origin, callback) {
+          // Opaque tool frames need the backend proxy to answer their preflights.
+          // @ts-expect-error Vite's callback type excludes its null success sentinel.
+          callback(null, origin === "null" ? false : defaultAllowedOrigins);
+        },
+      },
       // Transform the whole module graph at server start instead of on the
       // first request. Without this, a cold worktree discovers and transforms
       // modules one import-level at a time while the browser waits — which

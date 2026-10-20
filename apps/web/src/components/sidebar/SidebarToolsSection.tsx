@@ -14,7 +14,13 @@ import { useNavigate, useParams } from "@tanstack/react-router";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { AsyncResult, Atom } from "effect/reactivity";
-import { GlobeIcon, PlusIcon, SquareTerminalIcon, TriangleAlertIcon } from "lucide-react";
+import {
+  AppWindowIcon,
+  GlobeIcon,
+  PlusIcon,
+  SquareTerminalIcon,
+  TriangleAlertIcon,
+} from "lucide-react";
 import { memo, useState } from "react";
 
 import { useLocalStorage } from "../../hooks/useLocalStorage";
@@ -150,8 +156,12 @@ export const SidebarToolsSection = memo(function SidebarToolsSection() {
           !row.offline && readEnvironmentScope(environmentId, AuthSettingsWriteScope);
         const items: Array<ContextMenuItem<ToolMenuAction>> = [
           { id: "open", label: "Open" },
-          { id: "restart", label: "Restart", disabled: !canOperate },
-          { id: "stop", label: "Stop", disabled: !canOperate },
+          ...(definition.kind === "web"
+            ? []
+            : [
+                { id: "restart" as const, label: "Restart", disabled: !canOperate },
+                { id: "stop" as const, label: "Stop", disabled: !canOperate },
+              ]),
           ...(definition.status === undefined
             ? []
             : [{ id: "refresh" as const, label: "Refresh status", disabled: row.offline }]),
@@ -268,7 +278,12 @@ const SidebarToolRow = memo(function SidebarToolRow(props: {
   onContextMenu: (row: EnvironmentToolRow, position: { x: number; y: number }) => void;
 }) {
   const { row } = props;
-  const Icon = row.definition.kind === "terminal" ? SquareTerminalIcon : GlobeIcon;
+  const Icon =
+    row.definition.kind === "terminal"
+      ? SquareTerminalIcon
+      : row.definition.kind === "web"
+        ? AppWindowIcon
+        : GlobeIcon;
   const button = (
     <SidebarMenuButton
       isActive={props.active}
@@ -286,7 +301,8 @@ const SidebarToolRow = memo(function SidebarToolRow(props: {
         )}
       >
         <Icon className="size-4" />
-        {row.offline ? null : row.definition.kind === "terminal" ? (
+        {row.offline || row.definition.kind === "web" ? null : row.definition.kind ===
+          "terminal" ? (
           <TerminalToolRunningDot environmentId={row.environmentId} toolId={row.toolId} />
         ) : (
           <BrowserToolRunningDot environmentId={row.environmentId} toolId={row.toolId} />

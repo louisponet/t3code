@@ -171,6 +171,7 @@ const fixture = Effect.fn("fixture")(function* (
               patch.deviceOnboardingCompleted ?? current.deviceOnboardingCompleted,
           })),
         streamChanges: Stream.empty,
+        settingsFileTrusted: Effect.succeed(true),
         subscribeChanges: Effect.succeed(Stream.empty),
       }),
     ),

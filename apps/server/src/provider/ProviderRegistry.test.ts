@@ -373,6 +373,7 @@ function makeMutableServerSettingsService(
       get streamChanges() {
         return Stream.fromPubSub(changes);
       },
+      settingsFileTrusted: Effect.succeed(true),
       get subscribeChanges() {
         return PubSub.subscribe(changes).pipe(
           Effect.map((subscription) => Stream.fromSubscription(subscription)),

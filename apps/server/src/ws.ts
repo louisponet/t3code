@@ -184,6 +184,7 @@ import { withTerminalOutputWindow } from "./terminal/OutputProtocol.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as ServerBrowser from "./preview/ServerBrowser.ts";
 import * as DeviceService from "./device/DeviceService.ts";
+import * as EnvironmentTools from "./environmentTools/EnvironmentTools.ts";
 import { remoteSshDeviceHosts } from "./device/localSshDeviceHost.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import { issueAssetUrl } from "./assets/AssetAccess.ts";
@@ -1204,6 +1205,7 @@ const layerWsRpc = (
       const reviewFindings = yield* ReviewFindingService.ReviewFindingService;
       const pullRequestSync = yield* PullRequestSyncReactor.PullRequestSyncReactor;
       const deviceService = yield* DeviceService.DeviceService;
+      const environmentTools = yield* EnvironmentTools.EnvironmentTools;
       const deviceHostContext =
         yield* Effect.context<Effect.Services<ReturnType<typeof remoteSshDeviceHosts>>>();
       const orchestrationEngine = yield* Orchestrator.OrchestratorV2;
@@ -2918,6 +2920,19 @@ const layerWsRpc = (
         [WS_METHODS.deviceDetail]: (input) => deviceService.detail(input),
         [WS_METHODS.deviceAction]: (input) => deviceService.action(input),
         [WS_METHODS.subscribeDeviceState]: (_input) => DeviceService.stateStream(deviceService),
+        [WS_METHODS.environmentToolsOpen]: (input) =>
+          Effect.annotateCurrentSpan({ "environment_tool.id": input.toolId }).pipe(
+            Effect.andThen(environmentTools.open(input)),
+          ),
+        [WS_METHODS.environmentToolsStop]: (input) =>
+          Effect.annotateCurrentSpan({ "environment_tool.id": input.toolId }).pipe(
+            Effect.andThen(environmentTools.stop(input)),
+          ),
+        [WS_METHODS.environmentToolsRefreshStatus]: (input) =>
+          Effect.annotateCurrentSpan({ "environment_tool.id": input.toolId }).pipe(
+            Effect.andThen(environmentTools.refreshStatus(input.toolId)),
+          ),
+        [WS_METHODS.subscribeEnvironmentToolStatus]: (_input) => environmentTools.streamStatus,
         [WS_METHODS.subscribeDiscoveredLocalServers]: (input) =>
           Stream.callback<DiscoveredLocalServerList>((queue) =>
             Effect.gen(function* () {

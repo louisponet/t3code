@@ -1597,3 +1597,28 @@ it.live("a desktop page that comes back reconnects without waiting for a viewer"
     }),
   ).pipe(Effect.provide(layer)),
 );
+
+it("closes unwatched agent and tool tabs once idle, but never a tool tab the desktop draws", () => {
+  const now = Date.UTC(2026, 9, 20);
+  const idleSince = now - 31 * 60 * 1000;
+  const tab = (overrides: Partial<Parameters<typeof ServerBrowser.isIdleClosableTab>[0]>) => ({
+    threadId: "thread-1",
+    usedAt: idleSince,
+    viewers: new Set<unknown>(),
+    desktop: null,
+    control: { agentId: null },
+    ...overrides,
+  });
+  expect(ServerBrowser.isIdleClosableTab(tab({ control: { agentId: "agent-1" } }), now)).toBe(true);
+  expect(ServerBrowser.isIdleClosableTab(tab({ threadId: "tool:dash" }), now)).toBe(true);
+  expect(ServerBrowser.isIdleClosableTab(tab({}), now)).toBe(false);
+  expect(ServerBrowser.isIdleClosableTab(tab({ threadId: "tool:dash", desktop: {} }), now)).toBe(
+    false,
+  );
+  expect(
+    ServerBrowser.isIdleClosableTab(tab({ threadId: "tool:dash", viewers: new Set(["v"]) }), now),
+  ).toBe(false);
+  expect(
+    ServerBrowser.isIdleClosableTab(tab({ threadId: "tool:dash", usedAt: now - 60_000 }), now),
+  ).toBe(false);
+});

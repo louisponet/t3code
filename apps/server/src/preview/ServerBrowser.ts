@@ -12,6 +12,7 @@ import {
   type PreviewReportProfilesInput,
   PREVIEW_AUTOMATION_SERVER_OPERATIONS,
   PreviewViewportSetting as PreviewViewportSettingSchema,
+  isEnvironmentToolThreadId,
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
   type PreviewAutomationActionEvent,
   type PreviewAutomationClickInput,
@@ -42,6 +43,7 @@ import {
   SERVER_BROWSER_AUTOMATION_CLIENT_ID,
   type PreviewAppearancePreference,
 } from "@t3tools/contracts";
+import { browserNavigationTargetUrl } from "@t3tools/shared/browserNavigationTarget";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { normalizePreviewUrl } from "@t3tools/shared/preview";
 import { resolvePreviewViewport } from "@t3tools/shared/previewViewport";
@@ -340,8 +342,27 @@ const READ_OPERATIONS: ReadonlySet<PreviewAutomationRequest["operation"]> = new 
 
 const AGENT_TAB_LIMIT = 8;
 const SERVER_TAB_LIMIT = 32;
-const AGENT_TAB_IDLE_MS = 30 * 60 * 1000;
+const IDLE_TAB_MS = 30 * 60 * 1000;
 const IDLE_SWEEP_INTERVAL = "1 minute";
+
+/**
+ * Agent tabs and tool tabs nobody watches close after a while; both reopen on demand. A tool tab
+ * the desktop app draws natively is exempt, since its webview never counts as a viewer.
+ */
+export const isIdleClosableTab = (
+  tab: {
+    readonly threadId: string;
+    readonly usedAt: number;
+    readonly viewers: ReadonlySet<unknown>;
+    readonly desktop: unknown;
+    readonly control: { readonly agentId: string | null };
+  },
+  now: number,
+): boolean =>
+  tab.viewers.size === 0 &&
+  tab.usedAt < now - IDLE_TAB_MS &&
+  (tab.control.agentId !== null ||
+    (isEnvironmentToolThreadId(tab.threadId) && tab.desktop === null));
 
 const DOWNLOAD_LIMIT = 20;
 const ABORTED_NAVIGATION_DOWNLOAD_WAIT_MS = 5_000;
@@ -1237,12 +1258,15 @@ const make = Effect.gen(function* () {
       );
   };
 
-  const closeIdleAgentTabs = () => {
-    const cutoff = Date.now() - AGENT_TAB_IDLE_MS;
-    for (const tab of tabs.values()) {
-      if (tab.control.agentId !== null && tab.viewers.size === 0 && tab.usedAt < cutoff)
-        dropTab(tab, true);
-    }
+  const detachViewer = (tab: ServerTab, viewer: ViewerState) => {
+    tab.viewers.delete(viewer);
+    // A tool tab's idle time starts when its last viewer leaves.
+    if (tab.viewers.size === 0 && isEnvironmentToolThreadId(tab.threadId)) tab.usedAt = Date.now();
+  };
+
+  const closeIdleTabs = () => {
+    const now = Date.now();
+    for (const tab of tabs.values()) if (isIdleClosableTab(tab, now)) dropTab(tab, true);
   };
 
   const latestThreadTab = (threadId: string, agentSessionId?: string) => {
@@ -1368,14 +1392,8 @@ const make = Effect.gen(function* () {
     return { ...status, title: (await tab.page.title().catch(() => "")) || null };
   };
 
-  const resolveNavigationUrl = (input: PreviewAutomationNavigateInput) => {
-    if (input.url !== undefined) return normalizePreviewUrl(input.url);
-    const target = input.target!;
-    if (target.kind === "url") return normalizePreviewUrl(target.url);
-
-    const path = target.path ?? "";
-    return `${target.protocol ?? "http"}://localhost:${target.port}${path.startsWith("/") || path === "" ? path : `/${path}`}`;
-  };
+  const resolveNavigationUrl = (input: PreviewAutomationNavigateInput) =>
+    normalizePreviewUrl(input.url ?? browserNavigationTargetUrl(input.target!));
 
   const navigate = async (
     tab: ServerTab,
@@ -1720,7 +1738,7 @@ const make = Effect.gen(function* () {
         const navigationTimeout = Math.min(request.timeoutMs, NAVIGATION_TIMEOUT_MS);
         const profileId = existing ? undefined : resolveOpenProfile(open.profileId);
         if (!existing) {
-          closeIdleAgentTabs();
+          closeIdleTabs();
           assertTabCapacity(request.agentSessionId);
         }
         const tab =
@@ -2248,7 +2266,7 @@ const make = Effect.gen(function* () {
         () =>
           Effect.promise(async () => {
             await tab.control.disconnect(viewer.id, () => releaseViewerInput(viewer, session));
-            tab.viewers.delete(viewer);
+            detachViewer(tab, viewer);
             broadcastControl(tab);
             reportLiveTabs();
           }),
@@ -2403,7 +2421,7 @@ const make = Effect.gen(function* () {
     ),
     Effect.forkScoped,
   );
-  yield* Effect.sync(closeIdleAgentTabs).pipe(
+  yield* Effect.sync(closeIdleTabs).pipe(
     Effect.repeat(Schedule.spaced(IDLE_SWEEP_INTERVAL)),
     Effect.forkScoped,
   );

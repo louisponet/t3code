@@ -93,7 +93,8 @@ Invalid rules are ignored; if the file cannot be parsed, T3 Code uses defaults.
 Each rule requires a `key` shortcut and a `command` ID. An optional `when`
 expression restricts when it runs.
 
-Project scripts use `script.{id}.run`, such as `script.test.run`.
+Project scripts use `script.{id}.run`, such as `script.test.run`. [Tools](./tools.md)
+use `tool.{id}.open`, such as `tool.lazygit.open`.
 
 ## Key syntax
 
@@ -105,10 +106,12 @@ Join modifiers and a key with `+`, such as `mod+shift+d` or `ctrl+l`.
 
 Available context keys are `terminalFocus`, `terminalOpen`, `previewFocus`,
 `previewOpen`, `modelPickerOpen`, `usagePageOpen`, `composerFocus`, `composerDraft`,
-`turnRunning`, `editableFocus`, `isWeb`, and `isDesktop`.
+`turnRunning`, `editableFocus`, `toolFocus`, `isWeb`, and `isDesktop`.
 `editableFocus` is true while a text field, the composer, or another editor has
-the keyboard. `isWeb` is true in a browser tab. `isDesktop` is true in the
-desktop app. Unknown keys evaluate to `false`.
+the keyboard. `toolFocus` is true while a terminal tool has the keyboard; only
+rules that mention it, and `tool.{id}.open` rules, run then. `isWeb` is true in a
+browser tab. `isDesktop` is true in the desktop app. Unknown keys evaluate to
+`false`.
 
 `mod+1` through `mod+9` jump to the first nine threads, and to models while the
 model picker is open. The thread jumps do not run while the model picker is open.

@@ -27,6 +27,20 @@ skip any incomplete UTF-8 prefix, and apply the line limit. Close the read handl
 before rewriting the capped file. Reading whole old logs would defeat the memory
 bound during startup.
 
+## Tool sessions
+
+Thread ids starting with `tool:` belong to
+[environment tools](../../apps/server/src/environmentTools/EnvironmentTools.ts), and only
+`openTool` launches into them. Public open and restart refuse the namespace and attaching ignores
+`cwd`, because a stray open with another `cwd` would replace a running TUI with a shell. A tool
+session stores its command and every relaunch reuses it. Its history is never persisted and is
+capped at the client's 512 KiB, since a TUI's redraws are worthless after a restart. Trimming can
+drop the sequence that entered the alternate screen or enabled mouse reporting, and a resize
+repaint does not resend it, so every live snapshot, not only a tool's, starts with the current
+value of a fixed set of DEC private modes. History restored from disk has no such state. A
+same-size attach to a running command session resizes by one row and back, because the kernel
+signals only real size changes and the TUI must redraw for the new viewer.
+
 ## Renderer ownership
 
 Android and web use the same `libghostty-vt` C ABI for terminal behavior. Platform

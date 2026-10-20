@@ -192,7 +192,11 @@ const runningSession: TerminalSessionState = {
   status: "running",
   version: 1,
 };
-const openRequest = { environmentId, input: { toolId, kind: "terminal" } };
+// The tool starts at the grid its viewport will show, not the PTY default.
+const openRequest = {
+  environmentId,
+  input: { toolId, kind: "terminal", cols: expect.any(Number), rows: expect.any(Number) },
+};
 
 const toolRow = (definition: EnvironmentToolDefinition, offline = false) => ({
   environmentId,
@@ -228,6 +232,13 @@ function recordPaletteShortcut(event: KeyboardEvent) {
 
 async function render() {
   await act(async () => root.render(<ToolPage environmentId={environmentId} toolId={toolId} />));
+}
+
+// The launch measures the viewport's grid first, which waits for the terminal fonts.
+async function renderLaunched() {
+  await render();
+  await vi.waitFor(() => expect(state.open).toHaveBeenCalled());
+  await act(async () => {});
 }
 
 function press(target: Element, init: KeyboardEventInit) {
@@ -309,7 +320,7 @@ afterEach(async () => {
 });
 
 it("gives the focused TUI every key but the palette escape hatch", async () => {
-  await render();
+  await renderLaunched();
   expect(state.open).toHaveBeenCalledExactlyOnceWith(openRequest);
   const input = await findTerminalInput();
   // The viewport focuses the surface once its WASM core is up and listening.
@@ -334,7 +345,7 @@ it("gives the focused TUI every key but the palette escape hatch", async () => {
 });
 
 it("relaunches from the exit overlay with Enter", async () => {
-  await render();
+  await renderLaunched();
   await setSession(exitedSession);
 
   const overlay = container.querySelector<HTMLElement>("[role='dialog']");
@@ -347,7 +358,7 @@ it("relaunches from the exit overlay with Enter", async () => {
 });
 
 it("goes back, without relaunching, on Enter at the overlay's Back button", async () => {
-  await render();
+  await renderLaunched();
   await setSession(exitedSession);
   const back = [...container.querySelectorAll("button")].find((button) =>
     button.textContent?.startsWith("Back"),
@@ -361,7 +372,7 @@ it("goes back, without relaunching, on Enter at the overlay's Back button", asyn
 });
 
 it("keeps the tool through a reconnect and never restarts one stopped meanwhile", async () => {
-  await render();
+  await renderLaunched();
   const input = await findTerminalInput();
   expect(state.open).toHaveBeenCalledOnce();
 

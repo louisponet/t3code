@@ -407,6 +407,24 @@ interface TerminalViewportProps {
   onOpenLink?: (url: string) => void;
 }
 
+export function useTerminalFont(advancedTypography: boolean) {
+  const family = useClientSettings((settings) =>
+    resolveTerminalFontPreference({
+      advanced: advancedTypography,
+      code: settings.fontFamilyCode,
+      terminal: settings.fontFamilyTerminal,
+    }),
+  );
+  const size = useClientSettings((settings) =>
+    resolveTerminalFontSizePreference({
+      advanced: advancedTypography,
+      code: settings.fontSizeCode,
+      terminal: settings.fontSizeTerminal,
+    }),
+  );
+  return { family, size };
+}
+
 interface TerminalLaunchLocation {
   readonly cwd: string;
   readonly worktreePath?: string | null;
@@ -490,21 +508,10 @@ function TerminalSessionViewport({
   });
   const canAddSelectionToChat = useEffectEvent(() => onAddTerminalContext !== undefined);
   const readTerminalLabel = useEffectEvent(() => terminalLabel);
-  const terminalFontFamily = useClientSettings((settings) =>
-    resolveTerminalFontPreference({
-      advanced: advancedTypography,
-      code: settings.fontFamilyCode,
-      terminal: settings.fontFamilyTerminal,
-    }),
-  );
-  const terminalFontSize = useClientSettings((settings) =>
-    resolveTerminalFontSizePreference({
-      advanced: advancedTypography,
-      code: settings.fontSizeCode,
-      terminal: settings.fontSizeTerminal,
-    }),
-  );
-  const terminalFontRef = useRef({ family: terminalFontFamily, size: terminalFontSize });
+  const terminalFont = useTerminalFont(advancedTypography);
+  const terminalFontFamily = terminalFont.family;
+  const terminalFontSize = terminalFont.size;
+  const terminalFontRef = useRef(terminalFont);
   const terminalSession = useAttachedTerminalSession({
     environmentId,
     terminal: {

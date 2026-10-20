@@ -2,10 +2,13 @@ import * as Schema from "effect/Schema";
 import { GitPreparePullRequestThreadInput } from "./git.ts";
 import {
   AuthOrchestrationOperateScope,
+  AuthPreviewOperateScope,
   AuthSettingsWriteScope,
   AuthSourceControlWriteScope,
+  AuthTerminalOperateScope,
   type AuthEnvironmentScope,
 } from "./auth.ts";
+import { EnvironmentToolKind } from "./environmentTools.ts";
 import { ORCHESTRATION_V2_WS_METHODS } from "./orchestrationV2.ts";
 import { WS_METHODS } from "./rpc.ts";
 
@@ -46,10 +49,20 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.scheduledTasksRunNow]: AuthOrchestrationOperateScope,
   [WS_METHODS.scheduledTasksRotateWebhookToken]: AuthOrchestrationOperateScope,
   [ORCHESTRATION_V2_WS_METHODS.stopWorkflow]: AuthOrchestrationOperateScope,
+  // Refined by the payload's kind in `clientRpcRequiredScopes`.
+  [WS_METHODS.environmentToolsOpen]: AuthTerminalOperateScope,
+  [WS_METHODS.environmentToolsStop]: AuthTerminalOperateScope,
 } as const;
 export type ClientGuardedRpcTag = keyof typeof CLIENT_GUARDED_RPC_SCOPES;
 
 const decodePrepareThread = Schema.decodeUnknownSync(GitPreparePullRequestThreadInput);
+const decodeEnvironmentToolTarget = Schema.decodeUnknownSync(
+  Schema.Struct({ kind: EnvironmentToolKind }),
+);
+const ENVIRONMENT_TOOL_KIND_SCOPES = {
+  terminal: AuthTerminalOperateScope,
+  browser: AuthPreviewOperateScope,
+} as const satisfies Record<EnvironmentToolKind, AuthEnvironmentScope>;
 
 export function clientRpcRequiredScopes(
   method: string,
@@ -59,6 +72,12 @@ export function clientRpcRequiredScopes(
     const payload = decodePrepareThread(input);
     if (payload.mode === "worktree" && payload.threadId !== undefined)
       return [AuthSourceControlWriteScope, AuthOrchestrationOperateScope];
+  }
+  if (
+    (method === WS_METHODS.environmentToolsOpen || method === WS_METHODS.environmentToolsStop) &&
+    input !== undefined
+  ) {
+    return [ENVIRONMENT_TOOL_KIND_SCOPES[decodeEnvironmentToolTarget(input).kind]];
   }
   return Object.hasOwn(CLIENT_GUARDED_RPC_SCOPES, method)
     ? [CLIENT_GUARDED_RPC_SCOPES[method as ClientGuardedRpcTag]]

@@ -195,6 +195,10 @@
       "types": "./src/state/deviceHubAccess.ts",
       "default": "./src/state/deviceHubAccess.ts"
     },
+    "./state/environmentTools": {
+      "types": "./src/state/environmentTools.ts",
+      "default": "./src/state/environmentTools.ts"
+    },
     "./state/preview": {
       "types": "./src/state/preview.ts",
       "default": "./src/state/preview.ts"

@@ -1,4 +1,5 @@
 import {
+  EnvironmentToolId,
   AuthEnvironmentMaintainScope,
   AuthDiagnosticsReadScope,
   AuthFilesystemReadScope,
@@ -189,6 +190,21 @@ describe("RPC authorization scopes", () => {
     ]) {
       expect(requiredScopeForRpcMethod(method)).toBe(AuthTerminalOperateScope);
     }
+  });
+
+  it("lets readers watch and refresh tool status but not start or stop tools", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.subscribeEnvironmentToolStatus)).toBe(
+      AuthOrchestrationReadScope,
+    );
+    expect(requiredScopeForRpcMethod(WS_METHODS.environmentToolsRefreshStatus)).toBe(
+      AuthOrchestrationReadScope,
+    );
+    expect(requiredScopeForRpcMethod(WS_METHODS.environmentToolsOpen)).toBe(
+      AuthTerminalOperateScope,
+    );
+    expect(requiredScopeForRpcMethod(WS_METHODS.environmentToolsStop)).toBe(
+      AuthTerminalOperateScope,
+    );
   });
 
   it("rejects unknown RPC method names", () => {
@@ -447,5 +463,48 @@ it.effect("denies manual cleanup before the handler without settings permission"
       requiredPermission: AuthSettingsWriteScope,
     });
     expect(handled).toBe(false);
+  }).pipe(Effect.scoped),
+);
+
+it.effect("authorizes opening and stopping a tool by the kind it opens", () =>
+  Effect.gen(function* () {
+    const tested = [WS_METHODS.environmentToolsOpen, WS_METHODS.environmentToolsStop] as const;
+    const group = WsRpcGroup.omit(
+      ...[...WsRpcGroup.requests.keys()].filter(
+        (tag): tag is Exclude<keyof typeof RPC_REQUIRED_SCOPES, (typeof tested)[number]> =>
+          !(tested as ReadonlyArray<string>).includes(tag),
+      ),
+    );
+    const handled: Array<string> = [];
+    const client = yield* RpcTest.makeClient(group).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          group.toLayerHandler(WS_METHODS.environmentToolsOpen, (input) =>
+            Effect.sync(() => {
+              handled.push(`open:${input.kind}`);
+              return { kind: "browser" as const, threadId: ThreadId.make("tool:dash"), tabId: "t" };
+            }),
+          ),
+          group.toLayerHandler(WS_METHODS.environmentToolsStop, (input) =>
+            Effect.sync(() => {
+              handled.push(`stop:${input.kind}`);
+            }),
+          ),
+          RpcAuthorization.layer([AuthOrchestrationReadScope, AuthPreviewOperateScope]),
+        ),
+      ),
+    );
+    const toolId = EnvironmentToolId.make("dash");
+    yield* client[WS_METHODS.environmentToolsOpen]({ toolId, kind: "browser" });
+    yield* client[WS_METHODS.environmentToolsStop]({ toolId, kind: "browser" });
+    for (const denied of [
+      client[WS_METHODS.environmentToolsOpen]({ toolId, kind: "terminal" }),
+      client[WS_METHODS.environmentToolsStop]({ toolId, kind: "terminal" }),
+    ]) {
+      expect(yield* denied.pipe(Effect.flip)).toMatchObject({
+        requiredPermission: AuthTerminalOperateScope,
+      });
+    }
+    expect(handled).toEqual(["open:browser", "stop:browser"]);
   }).pipe(Effect.scoped),
 );

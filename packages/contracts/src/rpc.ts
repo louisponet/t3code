@@ -286,6 +286,14 @@ import {
   DeviceSession,
   DeviceShutdownInput,
 } from "./device.ts";
+import {
+  EnvironmentToolError,
+  EnvironmentToolOpenInput,
+  EnvironmentToolOpenResult,
+  EnvironmentToolRefreshStatusInput,
+  EnvironmentToolStatusEvent,
+  EnvironmentToolStopInput,
+} from "./environmentTools.ts";
 import {} from "./previewAutomation.ts";
 import {
   ServerConfigStreamEvent,
@@ -462,6 +470,10 @@ export const WS_METHODS = {
   deviceDetail: "device.detail",
   deviceAction: "device.action",
 
+  environmentToolsOpen: "environmentTools.open",
+  environmentToolsStop: "environmentTools.stop",
+  environmentToolsRefreshStatus: "environmentTools.refreshStatus",
+
   serverProbe: "server.probe",
   serverGetConfig: "server.getConfig",
   serverRefreshProviders: "server.refreshProviders",
@@ -565,6 +577,7 @@ export const WS_METHODS = {
   subscribePreviewEvents: "subscribePreviewEvents",
   subscribeDiscoveredLocalServers: "subscribeDiscoveredLocalServers",
   subscribeDeviceState: "subscribeDeviceState",
+  subscribeEnvironmentToolStatus: "subscribeEnvironmentToolStatus",
   subscribeServerConfig: "subscribeServerConfig",
   subscribeServerLifecycle: "subscribeServerLifecycle",
   subscribeAuthAccess: "subscribeAuthAccess",
@@ -1593,6 +1606,29 @@ const WsSubscribeDeviceStateRpc = Rpc.make(WS_METHODS.subscribeDeviceState, {
   stream: true,
 });
 
+const WsEnvironmentToolsOpenRpc = Rpc.make(WS_METHODS.environmentToolsOpen, {
+  payload: EnvironmentToolOpenInput,
+  success: EnvironmentToolOpenResult,
+  error: Schema.Union([EnvironmentToolError, EnvironmentAuthorizationError]),
+});
+
+const WsEnvironmentToolsStopRpc = Rpc.make(WS_METHODS.environmentToolsStop, {
+  payload: EnvironmentToolStopInput,
+  error: Schema.Union([EnvironmentToolError, EnvironmentAuthorizationError]),
+});
+
+const WsEnvironmentToolsRefreshStatusRpc = Rpc.make(WS_METHODS.environmentToolsRefreshStatus, {
+  payload: EnvironmentToolRefreshStatusInput,
+  error: Schema.Union([EnvironmentToolError, EnvironmentAuthorizationError]),
+});
+
+const WsSubscribeEnvironmentToolStatusRpc = Rpc.make(WS_METHODS.subscribeEnvironmentToolStatus, {
+  payload: Schema.Struct({}),
+  success: EnvironmentToolStatusEvent,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
+
 const WsOrchestrationV2DispatchCommandRpc = Rpc.make(ORCHESTRATION_V2_WS_METHODS.dispatchCommand, {
   payload: OrchestrationV2RpcSchemas.dispatchCommand.input,
   success: OrchestrationV2RpcSchemas.dispatchCommand.output,
@@ -2027,6 +2063,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsDeviceDetailRpc,
   WsDeviceActionRpc,
   WsSubscribeDeviceStateRpc,
+  WsEnvironmentToolsOpenRpc,
+  WsEnvironmentToolsStopRpc,
+  WsEnvironmentToolsRefreshStatusRpc,
+  WsSubscribeEnvironmentToolStatusRpc,
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,
   WsSubscribeAuthAccessRpc,

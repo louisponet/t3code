@@ -1,5 +1,6 @@
 import * as Schema from "effect/Schema";
 import { ForwardCompatibleArray, TrimmedString } from "./baseSchemas.ts";
+import { ENVIRONMENT_TOOL_ID_PATTERN, MAX_ENVIRONMENT_TOOL_ID_LENGTH } from "./environmentTools.ts";
 
 export const MAX_KEYBINDING_VALUE_LENGTH = 64;
 const MAX_KEYBINDING_WHEN_LENGTH = 256;
@@ -124,9 +125,19 @@ export const SCRIPT_RUN_COMMAND_PATTERN = Schema.TemplateLiteral([
   Schema.Literal(".run"),
 ]);
 
+export const TOOL_OPEN_COMMAND_PATTERN = Schema.TemplateLiteral([
+  Schema.Literal("tool."),
+  Schema.NonEmptyString.check(
+    Schema.isMaxLength(MAX_ENVIRONMENT_TOOL_ID_LENGTH),
+    Schema.isPattern(ENVIRONMENT_TOOL_ID_PATTERN),
+  ),
+  Schema.Literal(".open"),
+]);
+
 export const KeybindingCommand = Schema.Union([
   Schema.Literals(STATIC_KEYBINDING_COMMANDS),
   SCRIPT_RUN_COMMAND_PATTERN,
+  TOOL_OPEN_COMMAND_PATTERN,
 ]);
 export type KeybindingCommand = typeof KeybindingCommand.Type;
 

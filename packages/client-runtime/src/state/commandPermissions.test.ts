@@ -8,8 +8,11 @@ import { describe, expect, it } from "@effect/vitest";
 import { vi } from "vite-plus/test";
 import {
   AuthOrchestrationOperateScope,
+  AuthPreviewOperateScope,
   AuthSettingsWriteScope,
   AuthSourceControlWriteScope,
+  AuthTerminalOperateScope,
+  EnvironmentToolId,
   ThreadId,
   EnvironmentId,
   ScheduledTaskId,
@@ -252,6 +255,34 @@ it.effect(
         yield* prepare.authorize(registry, env, input);
       }),
     ),
+);
+
+it.effect("guards opening and stopping a tool by the kind it opens", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const registry = yield* setup;
+      registry.set(
+        sessions(env),
+        AsyncResult.success({
+          ...grant(false),
+          scopes: [AuthPreviewOperateScope],
+          permissions: [AuthPreviewOperateScope],
+        }),
+      );
+      const toolId = EnvironmentToolId.make("dash");
+      for (const method of [WS_METHODS.environmentToolsOpen, WS_METHODS.environmentToolsStop]) {
+        const command = createCommandPermissions(runtime, method);
+        const browser = { toolId, kind: "browser" };
+        const terminal = { toolId, kind: "terminal" };
+        expect(registry.get(command.permissionAtom(env, browser))).toBe(true);
+        yield* command.authorize(registry, env, browser);
+        expect(registry.get(command.permissionAtom(env, terminal))).toBe(false);
+        expect(
+          (yield* command.authorize(registry, env, terminal).pipe(Effect.flip)).requiredPermission,
+        ).toBe(AuthTerminalOperateScope);
+      }
+    }),
+  ),
 );
 
 it.effect("honors exact empty permissions and preserves legacy parent grants", () =>

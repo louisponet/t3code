@@ -115,6 +115,31 @@ export function terminalFontSize(size?: number): number {
   return Math.max(MIN_TERMINAL_FONT_SIZE, Math.min(MAX_TERMINAL_FONT_SIZE, Math.round(size)));
 }
 
+// Cell metrics must come from the faces that will render; measuring before the
+// bundled webfonts load would size the grid from a fallback font.
+async function measureTerminalFont(
+  context: CanvasRenderingContext2D,
+  font: { readonly family?: string; readonly size?: number } | undefined,
+) {
+  const fontSize = terminalFontSize(font?.size);
+  try {
+    await ensureTerminalSymbolsFont();
+  } catch {}
+  const fontFamily = await loadTerminalFontFamily(font?.family, fontSize);
+  return { fontSize, fontFamily, metrics: measureGhosttyCell(context, fontSize, fontFamily) };
+}
+
+/** The grid a surface would fit in `mount`, so a process can start at the size it is shown at. */
+export async function fittedTerminalGrid(
+  mount: HTMLElement,
+  font: { readonly family?: string; readonly size?: number },
+): Promise<{ cols: number; rows: number } | null> {
+  const context = document.createElement("canvas").getContext("2d");
+  if (!context || mount.clientWidth <= 0 || mount.clientHeight <= 0) return null;
+  const { metrics } = await measureTerminalFont(context, font);
+  return terminalGridSize(mount.clientWidth, mount.clientHeight, metrics, CONTENT_PADDING);
+}
+
 export function shouldBlinkTerminalCursor(state: {
   readonly focused: boolean;
   readonly cursorBlinking: boolean;
@@ -671,14 +696,7 @@ export class GhosttyTerminalSurface {
     if (!context) throw new Error("Canvas 2D is unavailable");
     context.fillStyle = `rgb(${options.theme.background.r}, ${options.theme.background.g}, ${options.theme.background.b})`;
     context.fillRect(0, 0, canvas.width, canvas.height);
-    const fontSize = terminalFontSize(options.font?.size);
-    try {
-      // Cell metrics must come from the faces that will render; measuring before
-      // the bundled webfonts load would size the grid from a fallback font.
-      await ensureTerminalSymbolsFont();
-    } catch {}
-    const fontFamily = await loadTerminalFontFamily(options.font?.family, fontSize);
-    const metrics = measureGhosttyCell(context, fontSize, fontFamily);
+    const { fontFamily, metrics } = await measureTerminalFont(context, options.font);
     const grid = terminalGridSize(mount.clientWidth, mount.clientHeight, metrics, CONTENT_PADDING);
     const core = await GhosttyTerminalCore.create(
       grid.cols,

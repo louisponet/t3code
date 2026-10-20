@@ -33,7 +33,8 @@ import { useEnvironmentScope } from "../../state/session";
 import { terminalEnvironment } from "../../state/terminal";
 import { useAttachedTerminalSession } from "../../state/terminalSessions";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { TerminalViewport } from "../ThreadTerminalDrawer";
+import { fittedTerminalGrid } from "../../terminal/ghostty/surface";
+import { TerminalViewport, useTerminalFont } from "../ThreadTerminalDrawer";
 import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
 
@@ -56,9 +57,21 @@ export function ToolTerminalView(props: ToolTerminalViewProps) {
   const open = useAtomCommand(environmentToolsEnvironment.open, { reportFailure: false });
   const [opened, setOpened] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [advancedTypography] = useLocalStorage(
+    TYPOGRAPHY_ADVANCED_STORAGE_KEY,
+    false,
+    Schema.Boolean,
+  );
+  const font = useTerminalFont(advancedTypography);
+  const boxRef = useRef<HTMLDivElement>(null);
 
   const launch = async (): Promise<boolean> => {
-    const result = await open({ environmentId, input: { toolId, kind: "terminal" } });
+    // A TUI that is still starting misses the resize to the viewport's size, so it starts there.
+    const grid = boxRef.current === null ? null : await fittedTerminalGrid(boxRef.current, font);
+    const result = await open({
+      environmentId,
+      input: { toolId, kind: "terminal", ...grid },
+    });
     if (result._tag === "Success") {
       setOpened(true);
       setError(null);
@@ -103,9 +116,19 @@ export function ToolTerminalView(props: ToolTerminalViewProps) {
       </div>
     );
   }
-  // Read-only devices observe whatever is running; they never start the tool.
-  if (canOpen && !opened) return null;
-  return <ToolTerminalSession {...props} canOpen={canOpen} launch={launch} />;
+  return (
+    <div ref={boxRef} className="relative min-h-0 flex-1">
+      {/* Read-only devices observe whatever is running; they never start the tool. */}
+      {canOpen && !opened ? null : (
+        <ToolTerminalSession
+          {...props}
+          advancedTypography={advancedTypography}
+          canOpen={canOpen}
+          launch={launch}
+        />
+      )}
+    </div>
+  );
 }
 
 function ToolTerminalSession({
@@ -113,9 +136,11 @@ function ToolTerminalSession({
   environmentLabel,
   toolId,
   tool,
+  advancedTypography,
   canOpen,
   launch,
 }: ToolTerminalViewProps & {
+  readonly advancedTypography: boolean;
   readonly canOpen: boolean;
   readonly launch: () => Promise<boolean>;
 }) {
@@ -126,11 +151,6 @@ function ToolTerminalSession({
   const threadRef = { environmentId, threadId: terminal.threadId };
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const [advancedTypography] = useLocalStorage(
-    TYPOGRAPHY_ADVANCED_STORAGE_KEY,
-    false,
-    Schema.Boolean,
-  );
   const canOperateTerminal = useEnvironmentScope(environmentId, AuthTerminalOperateScope);
   const refreshStatus = useAtomCommand(environmentToolsEnvironment.refreshStatus, {
     reportFailure: false,
@@ -212,7 +232,7 @@ function ToolTerminalSession({
   };
 
   return (
-    <div className="relative min-h-0 flex-1">
+    <>
       <div data-terminal-owner="tool" className="absolute inset-0">
         <TerminalViewport
           advancedTypography={advancedTypography}
@@ -245,7 +265,7 @@ function ToolTerminalSession({
           onRun={() => void relaunch()}
         />
       )}
-    </div>
+    </>
   );
 }
 

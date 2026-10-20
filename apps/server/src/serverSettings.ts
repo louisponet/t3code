@@ -194,6 +194,12 @@ export class ServerSettingsService extends Context.Service<
     readonly streamChanges: Stream.Stream<ServerSettings>;
 
     /**
+     * False while settings.json fails to decode and defaults stand in for it, so an entry missing
+     * from the current settings may still be in the file.
+     */
+    readonly settingsFileTrusted: Effect.Effect<boolean, ServerSettingsError>;
+
+    /**
      * Use this before reading a snapshot when changes between the snapshot and
      * a lazily started stream must not be lost.
      */
@@ -256,6 +262,7 @@ const makeTest = (overrides: DeepPartial<ServerSettings> = {}) =>
       withSettingsSnapshot: (use) =>
         writeSemaphore.withPermits(1)(getSettings.pipe(Effect.flatMap(use))),
       streamChanges: Stream.empty,
+      settingsFileTrusted: Effect.succeed(true),
       subscribeChanges: Effect.succeed(Stream.empty),
     } satisfies ServerSettingsService["Service"];
   });
@@ -787,18 +794,21 @@ const make = Effect.gen(function* () {
         yield* secretStore.remove(move.from).pipe(Effect.ignore);
       }
     }
-    return migrated;
+    return { settings: migrated, fileTrusted: settingsFileTrusted };
   });
 
-  const settingsCache = yield* Cache.makeWith<typeof cacheKey, ServerSettings, ServerSettingsError>(
-    () => loadSettingsFromDisk,
-    {
-      capacity: 1,
-      timeToLive: (exit) => (Exit.isSuccess(exit) ? Duration.infinity : Duration.zero),
-    },
-  );
+  const settingsCache = yield* Cache.makeWith<
+    typeof cacheKey,
+    { readonly settings: ServerSettings; readonly fileTrusted: boolean },
+    ServerSettingsError
+  >(() => loadSettingsFromDisk, {
+    capacity: 1,
+    timeToLive: (exit) => (Exit.isSuccess(exit) ? Duration.infinity : Duration.zero),
+  });
 
-  const getSettingsFromCache = Cache.get(settingsCache, cacheKey);
+  const getSettingsFromCache = Cache.get(settingsCache, cacheKey).pipe(
+    Effect.map((loaded) => loaded.settings),
+  );
 
   const materializeSettingsSecrets = (
     settings: ServerSettings,
@@ -1021,7 +1031,7 @@ const make = Effect.gen(function* () {
             return materializedExit.value;
           }),
         );
-        yield* Cache.set(settingsCache, cacheKey, next);
+        yield* Cache.set(settingsCache, cacheKey, { settings: next, fileTrusted: true });
         yield* emitChange(next);
         return resolveTextGenerationProvider(materialized);
       }),
@@ -1161,6 +1171,9 @@ const make = Effect.gen(function* () {
         }),
       ),
     withSettingsSnapshot,
+    settingsFileTrusted: Cache.get(settingsCache, cacheKey).pipe(
+      Effect.map((loaded) => loaded.fileTrusted),
+    ),
     get streamChanges() {
       return materializeChanges(Stream.fromPubSub(changesPubSub));
     },

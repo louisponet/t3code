@@ -216,6 +216,40 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(layerServerSettings())),
   );
 
+  it.effect("keeps every setting and the raw entry when one tool in settings.json is broken", () =>
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const service = yield* ServerSettingsModule.ServerSettingsService;
+      const lazygit = { kind: "terminal", name: "lazygit", command: "lazygit" };
+      const missingCommand = { kind: "terminal", name: "btop" };
+      const newerKind = { kind: "simulator", name: "iPhone", device: { platform: "ios" } };
+      yield* fs.writeFileString(
+        config.settingsPath,
+        JSON.stringify({
+          enableAgentBrowserAccess: false,
+          tools: { lazygit, btop: missingCommand, "Bad Key": lazygit, sim: newerKind },
+        }),
+      );
+
+      const settings = yield* service.getSettings;
+      assert.isFalse(settings.enableAgentBrowserAccess);
+      assert.isTrue(settings.continueThreadsAfterServerUpdate);
+      assert.deepEqual(settings.tools, {
+        lazygit,
+        btop: missingCommand,
+        "Bad Key": lazygit,
+        sim: newerKind,
+      });
+
+      const htop = { kind: "terminal" as const, name: "htop", command: "htop" };
+      yield* service.updateSettings({ tools: { htop, "Bad Key": null } });
+      const persisted = JSON.parse(yield* fs.readFileString(config.settingsPath));
+      assert.isFalse(persisted.enableAgentBrowserAccess);
+      assert.deepEqual(persisted.tools, { lazygit, btop: missingCommand, sim: newerKind, htop });
+    }).pipe(Effect.provide(layerServerSettings())),
+  );
+
   it.effect("saves through a symlinked settings file without replacing the link", () =>
     Effect.gen(function* () {
       const config = yield* ServerConfig.ServerConfig;
@@ -2212,6 +2246,23 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       assert.deepEqual(settings.projectSettingsOverrides, {});
 
       assert.equal(yield* fileSystem.readFileString(serverConfig.settingsPath), broken);
+    }).pipe(Effect.provide(layerServerSettings())),
+  );
+
+  it.effect("distrusts the settings file only while it fails to decode", () =>
+    Effect.gen(function* () {
+      const serverConfig = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      yield* fileSystem.writeFileString(
+        serverConfig.settingsPath,
+        '{"tools": {"lazygit": {"kind": "terminal", "name": "lazygit", "command": "lazygit"}',
+      );
+      assert.deepEqual((yield* serverSettings.getSettings).tools, {});
+      assert.isFalse(yield* serverSettings.settingsFileTrusted);
+
+      yield* serverSettings.updateSettings({ enableAgentBrowserAccess: false });
+      assert.isTrue(yield* serverSettings.settingsFileTrusted);
     }).pipe(Effect.provide(layerServerSettings())),
   );
 });

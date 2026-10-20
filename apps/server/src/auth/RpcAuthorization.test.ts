@@ -509,6 +509,8 @@ it.effect("authorizes opening and stopping a tool by the kind it opens", () =>
     const toolId = EnvironmentToolId.make("dash");
     yield* client[WS_METHODS.environmentToolsOpen]({ toolId, kind: "browser" });
     yield* client[WS_METHODS.environmentToolsStop]({ toolId, kind: "browser" });
+    yield* client[WS_METHODS.environmentToolsOpen]({ toolId, kind: "web" });
+    yield* client[WS_METHODS.environmentToolsStop]({ toolId, kind: "web" });
     for (const denied of [
       client[WS_METHODS.environmentToolsOpen]({ toolId, kind: "terminal" }),
       client[WS_METHODS.environmentToolsStop]({ toolId, kind: "terminal" }),
@@ -517,6 +519,6 @@ it.effect("authorizes opening and stopping a tool by the kind it opens", () =>
         requiredPermission: AuthTerminalOperateScope,
       });
     }
-    expect(handled).toEqual(["open:browser", "stop:browser"]);
+    expect(handled).toEqual(["open:browser", "stop:browser", "open:web", "stop:web"]);
   }).pipe(Effect.scoped),
 );

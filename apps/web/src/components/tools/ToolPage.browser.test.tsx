@@ -11,9 +11,12 @@ import {
   type PreviewSessionSnapshot,
   type TerminalEnvironmentTool,
   type TerminalWriteInput,
+  type WebEnvironmentTool,
 } from "@t3tools/contracts";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 import { DEFAULT_RESOLVED_KEYBINDINGS, isMacPlatform } from "@t3tools/shared/keybindings";
+import { injectToolAppBootstrap, TOOL_APP_ESCAPE_MESSAGE_TYPE } from "@t3tools/shared/toolApp";
+import * as Option from "effect/Option";
 import { AsyncResult } from "effect/reactivity";
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -41,6 +44,7 @@ const state = vi.hoisted(() => {
     session: null as unknown,
     preview: null as unknown,
     streamFailure: null as unknown,
+    httpBaseUrl: "https://devbox.example/",
     listeners,
     subscribe: (listener: () => void) => {
       listeners.add(listener);
@@ -163,11 +167,18 @@ vi.mock(import("../preview/PreviewPanelShell"), () => ({
 vi.mock(import("../preview/PreviewView"), () => ({
   PreviewView: ({ tabId }: { tabId?: string | null }) => <div data-preview-tab={tabId ?? ""} />,
 }));
-vi.mock(import("../../state/session"), async (original) => ({
-  ...(await original()),
-  readEnvironmentScope: () => true,
-  useEnvironmentScope: () => true,
-}));
+vi.mock(import("../../state/session"), async (original) => {
+  const { useSyncExternalStore } = await import("react");
+  return {
+    ...(await original()),
+    readEnvironmentScope: () => true,
+    useEnvironmentScope: () => true,
+    usePreparedConnection: (() => {
+      const httpBaseUrl = useSyncExternalStore(state.subscribe, () => state.httpBaseUrl);
+      return Option.some({ httpBaseUrl });
+    }) as never,
+  };
+});
 vi.mock(import("../../hooks/useSettings"), async (original) => ({
   ...(await original()),
   getClientSettings: () => DEFAULT_CLIENT_SETTINGS,
@@ -291,6 +302,7 @@ beforeEach(() => {
   state.session = runningSession;
   state.preview = null;
   state.streamFailure = null;
+  state.httpBaseUrl = "https://devbox.example/";
   state.listeners.clear();
   state.open
     .mockReset()
@@ -317,6 +329,7 @@ afterEach(async () => {
   window.removeEventListener("keydown", recordShellShortcut, true);
   window.removeEventListener("keydown", recordPaletteShortcut);
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 it("gives the focused TUI every key but the palette escape hatch", async () => {
@@ -450,4 +463,186 @@ it("follows the browser tool's replacement tab and shows stopped only once none 
   await update({ preview: previewWith() });
   expect(container.textContent).toContain("Docs is stopped.");
   expect(state.open).toHaveBeenCalledOnce();
+});
+
+const webTool: WebEnvironmentTool = {
+  kind: "web",
+  name: "Dashboard",
+  target: { kind: "environment-port", port: 3000 },
+};
+const webOpened = (relativeUrl: string, expiresAt = Date.now() + 12 * 60 * 60_000) =>
+  AsyncResult.success({ kind: "web", relativeUrl, expiresAt });
+function pendingWebOpen() {
+  let resolve!: (result: ReturnType<typeof webOpened>) => void;
+  const promise = new Promise<ReturnType<typeof webOpened>>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
+}
+const shownFrame = () => container.querySelector("iframe");
+const reloadWeb = () => {
+  const button = [...container.querySelectorAll("button")].find((entry) =>
+    entry.textContent?.includes("Reload"),
+  );
+  return act(async () => button!.click());
+};
+
+it("renders a web app on the selected environment and reloads without terminal controls", async () => {
+  state.row = toolRow(webTool);
+  state.open.mockResolvedValueOnce(webOpened("/api/tool-app/first/"));
+  state.open.mockResolvedValueOnce(webOpened("/api/tool-app/second/"));
+
+  await render();
+  expect(shownFrame()?.src).toBe("https://devbox.example/api/tool-app/first/");
+  expect(shownFrame()?.sandbox.contains("allow-same-origin")).toBe(false);
+  expect(container.textContent).not.toContain("Restart");
+  expect(container.textContent).not.toContain("Stop");
+
+  const initial = shownFrame();
+  await reloadWeb();
+  expect(shownFrame()).not.toBe(initial);
+  expect(shownFrame()?.src).toBe("https://devbox.example/api/tool-app/second/");
+  expect(state.open).toHaveBeenCalledTimes(2);
+  expect(state.open).toHaveBeenLastCalledWith({
+    environmentId,
+    input: { toolId, kind: "web" },
+  });
+});
+
+it("waits for a connected session before opening a web app and relaunches after reconnect", async () => {
+  state.row = toolRow(webTool);
+  state.presentation = presentation("reconnecting");
+  state.open.mockResolvedValueOnce(webOpened("/api/tool-app/first/"));
+  state.open.mockResolvedValueOnce(webOpened("/api/tool-app/reconnected/"));
+
+  await render();
+  expect(state.open).not.toHaveBeenCalled();
+  expect(shownFrame()).toBeNull();
+
+  await update({ presentation: presentation("connected") });
+  expect(shownFrame()?.src).toBe("https://devbox.example/api/tool-app/first/");
+
+  await update({ presentation: presentation("reconnecting"), row: toolRow(webTool, true) });
+  await update({ httpBaseUrl: "https://relay.example/environment/" });
+  expect(state.open).toHaveBeenCalledOnce();
+  expect(shownFrame()).toBeNull();
+
+  await update({ presentation: presentation("connected"), row: toolRow(webTool) });
+  expect(shownFrame()?.src).toBe("https://relay.example/api/tool-app/reconnected/");
+  expect(state.open).toHaveBeenCalledTimes(2);
+});
+
+it("ignores a pending web launch after reload and after permission is revoked", async () => {
+  state.row = toolRow(webTool);
+  const pending = pendingWebOpen();
+  state.open.mockReturnValueOnce(pending.promise);
+  state.open.mockResolvedValueOnce(webOpened("/api/tool-app/current/"));
+
+  await render();
+  expect(container.textContent).toContain("Opening Dashboard…");
+  await reloadWeb();
+  await act(async () => pending.resolve(webOpened("/api/tool-app/stale/")));
+  expect(shownFrame()?.src).toBe("https://devbox.example/api/tool-app/current/");
+
+  const revoked = pendingWebOpen();
+  state.open.mockReturnValueOnce(revoked.promise);
+  await reloadWeb();
+  await update({ permission: false });
+  await act(async () => revoked.resolve(webOpened("/api/tool-app/revoked/")));
+  expect(shownFrame()).toBeNull();
+  expect(container.textContent).toContain("Pair this client again with preview access");
+
+  state.open.mockResolvedValueOnce(webOpened("/api/tool-app/repaired/"));
+  await update({ permission: true });
+  expect(shownFrame()?.src).toBe("https://devbox.example/api/tool-app/repaired/");
+});
+
+it("recovers a failed web launch with Reload and uses a new connection origin", async () => {
+  state.row = toolRow(webTool);
+  state.open.mockResolvedValueOnce(AsyncResult.success({ kind: "browser", tabId: "wrong-kind" }));
+  state.open.mockResolvedValueOnce(webOpened("/api/tool-app/recovered/"));
+  state.open.mockResolvedValueOnce(webOpened("/api/tool-app/remote/"));
+
+  await render();
+  expect(container.textContent).toContain("Couldn't open Dashboard.");
+  await reloadWeb();
+  expect(shownFrame()?.src).toBe("https://devbox.example/api/tool-app/recovered/");
+
+  await update({ httpBaseUrl: "https://relay.example/environment/" });
+  expect(shownFrame()?.src).toBe("https://relay.example/api/tool-app/remote/");
+});
+
+it("renames a web app without reopening its frame", async () => {
+  state.row = toolRow(webTool);
+  state.open.mockResolvedValueOnce(webOpened("/api/tool-app/first/"));
+  state.open.mockResolvedValueOnce(webOpened("/api/tool-app/reopened/"));
+  await render();
+  const initial = shownFrame();
+
+  await update({ row: toolRow({ ...webTool, name: "Metrics" }) });
+  expect(shownFrame()).toBe(initial);
+  expect(shownFrame()?.title).toBe("Metrics");
+  expect(state.open).toHaveBeenCalledOnce();
+});
+
+it("opens the edited web target and discards the previous target's pending response", async () => {
+  state.row = toolRow(webTool);
+  const pending = pendingWebOpen();
+  state.open.mockReturnValueOnce(pending.promise);
+  state.open.mockResolvedValueOnce(webOpened("/api/tool-app/edited/"));
+  await render();
+
+  await update({ row: toolRow({ ...webTool, target: { kind: "environment-port", port: 4000 } }) });
+  await act(async () => pending.resolve(webOpened("/api/tool-app/outdated/")));
+  expect(shownFrame()?.src).toBe("https://devbox.example/api/tool-app/edited/");
+  expect(state.open).toHaveBeenCalledTimes(2);
+});
+
+it("re-mints the web frame before expiry and cancels renewal on permission loss", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  state.row = toolRow(webTool);
+  state.open.mockResolvedValueOnce(webOpened("/api/tool-app/first/", Date.now() + 120_000));
+  state.open.mockResolvedValueOnce(webOpened("/api/tool-app/renewed/", Date.now() + 240_000));
+
+  await render();
+  await act(async () => vi.advanceTimersByTimeAsync(60_000));
+  expect(shownFrame()?.src).toBe("https://devbox.example/api/tool-app/renewed/");
+  await update({ permission: false });
+  await act(async () => vi.advanceTimersByTimeAsync(240_000));
+  expect(state.open).toHaveBeenCalledTimes(2);
+  expect(shownFrame()).toBeNull();
+});
+
+it("returns the focused web app's palette escape to T3 and ignores other message sources", async () => {
+  const html = injectToolAppBootstrap("<html><body><button autofocus>App</button></body></html>");
+  state.row = toolRow(webTool);
+  state.open.mockResolvedValue(webOpened(`data:text/html,${encodeURIComponent(html)}`));
+  await render();
+  const frame = shownFrame()!;
+  await new Promise<void>((resolve) =>
+    frame.addEventListener("load", () => resolve(), { once: true }),
+  );
+  frame.focus();
+  expect(isTerminalFocused()).toBe(true);
+
+  window.dispatchEvent(
+    new MessageEvent("message", {
+      source: window,
+      data: { type: TOOL_APP_ESCAPE_MESSAGE_TYPE },
+    }),
+  );
+  expect(paletteCommands).toEqual([]);
+
+  const mod = isMacPlatform(navigator.platform) ? "Meta" : "Control";
+  await userEvent.keyboard(`{${mod}>}{Shift>}K{/Shift}{/${mod}}`);
+  await vi.waitFor(() => expect(paletteCommands).toEqual(["commandPalette.toggle"]));
+
+  container.querySelector("button")!.focus();
+  window.dispatchEvent(
+    new MessageEvent("message", {
+      source: frame.contentWindow,
+      data: { type: TOOL_APP_ESCAPE_MESSAGE_TYPE },
+    }),
+  );
+  expect(paletteCommands).toHaveLength(1);
 });

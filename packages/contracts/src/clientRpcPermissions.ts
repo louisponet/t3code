@@ -66,6 +66,7 @@ const decodeEnvironmentToolTarget = Schema.decodeUnknownSync(
 const ENVIRONMENT_TOOL_KIND_SCOPES = {
   terminal: AuthTerminalOperateScope,
   browser: AuthPreviewOperateScope,
+  web: AuthPreviewOperateScope,
 } as const satisfies Record<EnvironmentToolKind, AuthEnvironmentScope>;
 
 export function clientRpcRequiredScopes(

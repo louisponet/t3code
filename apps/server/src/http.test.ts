@@ -13,7 +13,13 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Tracer from "effect/Tracer";
-import { HttpClient, HttpClientRequest, HttpRouter, HttpServerResponse } from "effect/http";
+import {
+  FetchHttpClient,
+  HttpClient,
+  HttpClientRequest,
+  HttpRouter,
+  HttpServerResponse,
+} from "effect/http";
 import { openMediaFile } from "./assets/MediaFile.ts";
 
 import {
@@ -22,9 +28,13 @@ import {
   injectMcpAppThemeBootstrap,
   MCP_APP_MAX_HTML_BYTES,
 } from "@t3tools/shared/mcpApp";
-import { ORCHESTRATION_PROTOCOL_HEADER } from "@t3tools/contracts";
+import { EnvironmentToolId, ORCHESTRATION_PROTOCOL_HEADER } from "@t3tools/contracts";
 
 import * as ServerConfig from "./config.ts";
+import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
+import * as EnvironmentTools from "./environmentTools/EnvironmentTools.ts";
+import { issueToolAppUrl } from "./environmentTools/ToolAppAccess.ts";
+import * as ToolAppProxy from "./environmentTools/ToolAppProxy.ts";
 
 import {
   assetResponseHeaders,
@@ -101,7 +111,7 @@ describe("MCP app asset responses", () => {
 });
 
 describe("untraced requests", () => {
-  it.effect("drops the HTTP server span for browser trace exports, query string included", () => {
+  it.effect("omits server spans for trace exports and signed tool app URLs", () => {
     const spanNames: Array<string> = [];
     return Effect.gen(function* () {
       const layerRoutes = Layer.effectDiscard(
@@ -109,6 +119,7 @@ describe("untraced requests", () => {
           const router = yield* HttpRouter.HttpRouter;
           yield* router.add("POST", "/api/observability/v1/traces", HttpServerResponse.empty());
           yield* router.add("GET", "/api/environment", HttpServerResponse.empty());
+          yield* router.add("GET", "/api/tool-app/secret/*", HttpServerResponse.empty());
         }),
       );
       const services = yield* Layer.build(
@@ -120,6 +131,8 @@ describe("untraced requests", () => {
 
       yield* client.post("/api/observability/v1/traces");
       yield* client.post("/api/observability/v1/traces?x=1");
+      yield* client.get("/api/tool-app/secret/");
+      yield* client.get("/api/tool-app/secret/app.wasm?view=main");
       expect(spanNames).toEqual([]);
 
       yield* client.get("/api/environment");
@@ -140,6 +153,74 @@ describe("untraced requests", () => {
 });
 
 describe("browser API CORS", () => {
+  it.live("lets web apps answer opaque-origin preflights in development and production", () =>
+    Effect.gen(function* () {
+      const layerSecrets = Layer.mock(ServerSecretStore.ServerSecretStore)({
+        getOrCreateRandom: () => Effect.succeed(new Uint8Array(32).fill(42)),
+      });
+      const opened = yield* issueToolAppUrl(EnvironmentToolId.make("dashboard"), {
+        kind: "web",
+        name: "Dashboard",
+        target: { kind: "environment-port", port: 3000 },
+      }).pipe(Effect.provide(layerSecrets));
+      expect(opened).not.toBeNull();
+      if (opened === null) return;
+
+      for (const development of [false, true]) {
+        const layerConfig = Layer.unwrap(
+          Effect.gen(function* () {
+            const config = yield* ServerConfig.ServerConfig;
+            return ServerConfig.layer({
+              ...config,
+              devUrl: development ? new URL("http://localhost:5173") : undefined,
+            });
+          }),
+        ).pipe(
+          Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "http-tool-cors-test-" })),
+        );
+        const layerApp = Layer.merge(ToolAppProxy.layer, ServerHttp.layerBrowserApiCors).pipe(
+          Layer.provideMerge(layerSecrets),
+          Layer.provideMerge(
+            Layer.mock(EnvironmentTools.EnvironmentTools)({
+              webTargetUrl: () => Effect.succeed("http://localhost:3000/"),
+            }),
+          ),
+          Layer.provideMerge(FetchHttpClient.layer),
+          Layer.provide(layerConfig),
+          Layer.provide(NodeServices.layer),
+        );
+        const { handler, dispose } = HttpRouter.toWebHandler(layerApp, { disableLogger: true });
+        try {
+          const request = (path: string) =>
+            new Request(new URL(path, "https://backend.example"), {
+              method: "OPTIONS",
+              headers: {
+                origin: "null",
+                "access-control-request-method": "PUT",
+                "access-control-request-headers": "content-type,x-app-header",
+              },
+            });
+          const response = yield* Effect.promise(() =>
+            handler(request(opened.relativeUrl), Context.empty()),
+          );
+          expect(response.status).toBe(204);
+          expect(response.headers.get("access-control-allow-origin")).toBe("*");
+          expect(response.headers.get("access-control-allow-methods")).toBe("PUT");
+          expect(response.headers.get("access-control-allow-headers")).toBe(
+            "content-type,x-app-header",
+          );
+          expect(
+            (yield* Effect.promise(() =>
+              handler(request("/api/tool-app/invalid/"), Context.empty()),
+            )).status,
+          ).toBe(404);
+        } finally {
+          yield* Effect.promise(dispose);
+        }
+      }
+    }),
+  );
+
   it("accepts protocol negotiation with authenticated browser headers", async () => {
     const layerRoute = Layer.effectDiscard(
       Effect.gen(function* () {

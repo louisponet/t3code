@@ -29,6 +29,7 @@ export const environmentToolRowsAtom = Atom.make((get): EnvironmentToolRows => {
     sources.push({
       environmentId: environment.environmentId,
       offline: environment.connectionState !== "connected",
+      webApps: serverConfig.environment.capabilities.environmentToolWebApps === true,
       tools: serverConfig.settings.tools,
     });
   }

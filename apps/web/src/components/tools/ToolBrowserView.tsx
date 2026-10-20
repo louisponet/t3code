@@ -78,33 +78,33 @@ export function ToolBrowserView(props: {
 
   if (!canOpen) {
     return (
-      <ToolBrowserMessage>
+      <ToolViewMessage>
         Pair this client again with preview access to open browser tools.
-      </ToolBrowserMessage>
+      </ToolViewMessage>
     );
   }
   if (error !== null) {
     return (
-      <ToolBrowserMessage>
+      <ToolViewMessage>
         {error}
         <Button variant="outline" size="sm" onClick={() => void launch()}>
           Try again
         </Button>
-      </ToolBrowserMessage>
+      </ToolViewMessage>
     );
   }
   if (gone && !restarted) {
     return (
-      <ToolBrowserMessage>
+      <ToolViewMessage>
         {props.toolName} is stopped.
         <Button size="sm" onClick={() => void launch()}>
           Start
         </Button>
-      </ToolBrowserMessage>
+      </ToolViewMessage>
     );
   }
   // The first browser on a host can take a while: it downloads Chrome.
-  if (!listed) return <ToolBrowserMessage>Opening {props.toolName}…</ToolBrowserMessage>;
+  if (!listed) return <ToolViewMessage>Opening {props.toolName}…</ToolViewMessage>;
   return (
     <PreviewPanelShell mode="embedded">
       <PreviewView threadRef={threadRef} tabId={tab.id} visible allowRuntimeMove={false} />
@@ -112,7 +112,7 @@ export function ToolBrowserView(props: {
   );
 }
 
-function ToolBrowserMessage({ children }: { readonly children: ReactNode }) {
+export function ToolViewMessage({ children }: { readonly children: ReactNode }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-8 text-center text-sm text-muted-foreground">
       {children}

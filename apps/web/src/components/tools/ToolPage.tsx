@@ -29,6 +29,7 @@ import { ToolBrowserView } from "./ToolBrowserView";
 import { ToolEditorDialog } from "./ToolEditorDialog";
 import { ToolStatusBadge } from "./ToolStatusBadge";
 import { ToolTerminalView } from "./ToolTerminalView";
+import { ToolWebAppView } from "./ToolWebAppView";
 
 type EnvironmentAvailability =
   | "unknown"
@@ -86,6 +87,7 @@ export function ToolPage({
     viewShown && (phase === "connecting" || phase === "reconnecting" || phase === "offline");
   const tool = row !== null && (!row.offline || recovering) ? row.definition : null;
   if (viewShown !== (tool !== null)) setViewShown(tool !== null);
+  const [webReloadEpoch, setWebReloadEpoch] = useState(0);
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none isolate">
@@ -94,7 +96,12 @@ export function ToolPage({
           <h1 className="min-w-0 truncate text-sm font-medium">{tool?.name ?? toolId}</h1>
           {showEnvironment ? <Badge variant="outline">{environmentLabel}</Badge> : null}
           {tool === null ? null : (
-            <ToolPageControls environmentId={environmentId} toolId={toolId} tool={tool} />
+            <ToolPageControls
+              environmentId={environmentId}
+              toolId={toolId}
+              tool={tool}
+              onReloadWeb={() => setWebReloadEpoch((epoch) => epoch + 1)}
+            />
           )}
         </WorkspacePageHeader>
         <div className="relative flex min-h-0 flex-1 flex-col">
@@ -123,6 +130,15 @@ export function ToolPage({
               toolId={toolId}
               tool={tool}
             />
+          ) : tool.kind === "web" ? (
+            <ToolWebAppView
+              key={JSON.stringify([environmentId, toolId, tool.target])}
+              environmentId={environmentId}
+              toolId={toolId}
+              toolName={tool.name}
+              reloadEpoch={webReloadEpoch}
+              connected={phase === "connected"}
+            />
           ) : (
             <ToolBrowserView environmentId={environmentId} toolId={toolId} toolName={tool.name} />
           )}
@@ -136,10 +152,12 @@ function ToolPageControls({
   environmentId,
   toolId,
   tool,
+  onReloadWeb,
 }: {
   readonly environmentId: EnvironmentId;
   readonly toolId: EnvironmentToolId;
   readonly tool: EnvironmentToolDefinition;
+  readonly onReloadWeb: () => void;
 }) {
   const target = { toolId, kind: tool.kind };
   const status = useEnvironmentToolStatus(environmentId, toolId);
@@ -197,7 +215,13 @@ function ToolPageControls({
             Restart
           </Button>
         ) : null}
-        {canStop ? (
+        {tool.kind === "web" && canOpen ? (
+          <Button variant="ghost" size="xs" onClick={onReloadWeb}>
+            <RotateCwIcon />
+            Reload
+          </Button>
+        ) : null}
+        {tool.kind !== "web" && canStop ? (
           <Button
             variant="ghost"
             size="xs"

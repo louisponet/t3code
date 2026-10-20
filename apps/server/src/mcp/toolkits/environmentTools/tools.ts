@@ -47,7 +47,7 @@ const shared = {
 const EnvironmentToolsListTool = Tool.make("t3_environment_tools_list", {
   ...shared,
   description:
-    "List the tools in this environment's sidebar, in settings.json order. A terminal tool runs its command (usually a TUI) in one shared terminal on this host; a browser tool opens a URL or host port in this environment's browser. status is the last probe result: probes run only while someone has T3 Code open, so call t3_environment_tool_refresh_status for a fresh one.",
+    "List the tools in this environment's sidebar, in settings.json order. A terminal tool runs its command (usually a TUI) in one shared terminal on this host; a browser tool opens a URL or host port in this environment's browser; a web tool renders on the client through this environment's proxy. status is the last probe result: probes run only while someone has T3 Code open, so call t3_environment_tool_refresh_status for a fresh one.",
   // An empty struct serializes as `anyOf [object, array]`, which some
   // providers reject and then drop every tool on the server with it.
   parameters: Schema.Struct({
@@ -62,7 +62,7 @@ const EnvironmentToolsListTool = Tool.make("t3_environment_tools_list", {
 const EnvironmentToolUpsertTool = Tool.make("t3_environment_tool_upsert", {
   ...shared,
   description:
-    'Add a tool to this environment\'s sidebar, or replace the one with the same toolId, through normal settings persistence. Requires a live full-access/default calling thread. Terminal tools take {kind:"terminal",name,command,cwd?} (cwd defaults to ~); browser tools take {kind:"browser",name,target} with target {kind:"environment-port",port,path?} for a server on this host, or {kind:"url",url}. Optional status:{command,intervalSeconds?,timeoutSeconds?} runs a non-interactive shell command on this host that prints one JSON badge: {"tone":"good|info|warn|alert|muted","headline":"3 PRs waiting","detail":["…"],"items":[{"tone":"alert","text":"…"}],"total":12}; only headline is required. Every client of this environment can read definitions, so never put secrets in commands. A running terminal tool keeps its old command until the user restarts it; changing kind closes its sessions. Returns the updated list.',
+    'Add a tool to this environment\'s sidebar, or replace the one with the same toolId, through normal settings persistence. Requires a live full-access/default calling thread. Terminal tools take {kind:"terminal",name,command,cwd?} (cwd defaults to ~); browser tools take {kind:"browser",name,target} with target {kind:"environment-port",port,path?} for a server on this host, or {kind:"url",url}. Web apps take {kind:"web",name,target} with the same target options and render on each client through a proxy. Web apps must use relative asset, fetch, and WebSocket URLs under the target directory; cookies and browser storage are unavailable. Optional status:{command,intervalSeconds?,timeoutSeconds?} runs a non-interactive shell command on this host that prints one JSON badge: {"tone":"good|info|warn|alert|muted","headline":"3 PRs waiting","detail":["…"],"items":[{"tone":"alert","text":"…"}],"total":12}; only headline is required. Every client of this environment can read definitions, so never put secrets in commands. A running terminal tool keeps its old command until the user restarts it; changing kind closes its sessions. Returns the updated list.',
   parameters: Schema.Struct({
     toolId: EnvironmentToolId.annotate({
       description:

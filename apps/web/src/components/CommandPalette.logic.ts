@@ -606,6 +606,7 @@ export function buildToolActionItems(input: {
   labelById: ReadonlyMap<EnvironmentId, string>;
   terminalIcon: ReactNode;
   browserIcon: ReactNode;
+  webIcon: ReactNode;
   /** `environmentLabel` is set only when another environment has a tool with the same name. */
   renderDescription: (row: EnvironmentToolRow, environmentLabel: string | null) => ReactNode;
   runTool: (row: EnvironmentToolRow) => Promise<void>;
@@ -628,7 +629,12 @@ export function buildToolActionItems(input: {
       searchTerms: [row.definition.name, row.toolId, label, row.definition.kind, "tool"],
       title: row.definition.name,
       description: input.renderDescription(row, ambiguous ? label : null),
-      icon: row.definition.kind === "terminal" ? input.terminalIcon : input.browserIcon,
+      icon:
+        row.definition.kind === "terminal"
+          ? input.terminalIcon
+          : row.definition.kind === "web"
+            ? input.webIcon
+            : input.browserIcon,
       shortcutCommand: `tool.${row.toolId}.open`,
       run: () => input.runTool(row),
     };

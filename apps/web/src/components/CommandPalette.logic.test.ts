@@ -929,6 +929,7 @@ describe("tool palette items and shortcuts", () => {
       ]),
       terminalIcon: null,
       browserIcon: null,
+      webIcon: null,
       renderDescription: (_row, environmentLabel) => environmentLabel,
       runTool: async () => {},
     });

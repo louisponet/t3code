@@ -201,6 +201,9 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.deviceDetail]: AuthOrchestrationReadScope,
   [WS_METHODS.deviceAction]: AuthOrchestrationOperateScope,
   [WS_METHODS.subscribeDeviceState]: AuthOrchestrationReadScope,
+  // Open and stop come from CLIENT_GUARDED_RPC_SCOPES and are refined by the payload's kind.
+  [WS_METHODS.environmentToolsRefreshStatus]: AuthOrchestrationReadScope,
+  [WS_METHODS.subscribeEnvironmentToolStatus]: AuthOrchestrationReadScope,
   [WS_METHODS.subscribeServerConfig]: AuthOrchestrationReadScope,
   [WS_METHODS.subscribeServerLifecycle]: AuthOrchestrationReadScope,
   [WS_METHODS.subscribeAuthAccess]: AuthAccessReadScope,

@@ -31,6 +31,7 @@ import { ModelSelection } from "./modelSelection.ts";
 import { ProjectScript, type ProjectMutation } from "./project.ts";
 import { DEFAULT_RUNTIME_MODE, RuntimeMode } from "./providerPolicy.ts";
 import { BrowserProfile, BrowserProfileId, DEFAULT_BROWSER_PROFILE_ID } from "./browserProfile.ts";
+import { EnvironmentToolDefinition, EnvironmentToolId } from "./environmentTools.ts";
 import {
   DEFAULT_PREVIEW_APPEARANCE,
   DEFAULT_PREVIEW_ZOOM_FACTOR,
@@ -1223,6 +1224,12 @@ export const ServerSettings = Schema.Struct({
   usageModelAliases: Schema.Record(TrimmedNonEmptyString, TrimmedNonEmptyString).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
+
+  // Raw entries: a typo, a newer kind or a downgrade must not fail the whole file's decode, and
+  // entries this build cannot read round-trip untouched. Read them with `decodeEnvironmentTools`.
+  tools: Schema.Record(Schema.String, Schema.Unknown).pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -1331,6 +1338,8 @@ const ModelSelectionPatch = Schema.Struct({
   model: Schema.optionalKey(TrimmedNonEmptyString),
   options: Schema.optionalKey(ProviderOptionSelections),
 });
+
+const isEnvironmentToolId = Schema.is(EnvironmentToolId);
 
 export const ServerSettingsPatch = Schema.Struct({
   setModelFavorites: Schema.optionalKey(
@@ -1484,6 +1493,21 @@ export const ServerSettingsPatch = Schema.Struct({
 
   usageModelAliases: Schema.optionalKey(
     Schema.Record(TrimmedNonEmptyString, Schema.NullOr(TrimmedNonEmptyString)),
+  ),
+
+  // Per entry, like `usageLimitSources`; `null` removes. Only upserts need a valid id, so a
+  // hand-edited entry with a broken key can still be removed. Validated in full, but typed like
+  // the raw read side so a settings snapshot stays assignable to a patch.
+  tools: Schema.optionalKey(
+    Schema.Record(Schema.String, Schema.NullOr(EnvironmentToolDefinition))
+      .check(
+        Schema.makeFilter(
+          (tools) =>
+            Object.entries(tools).every(([id, tool]) => tool === null || isEnvironmentToolId(id)) ||
+            "Tool ids use lowercase letters, digits and dashes",
+        ),
+      )
+      .pipe(Schema.decodeTo(Schema.Record(Schema.String, Schema.Unknown))),
   ),
 });
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;

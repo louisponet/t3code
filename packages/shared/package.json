@@ -139,6 +139,14 @@
       "types": "./src/serverSettings.ts",
       "import": "./src/serverSettings.ts"
     },
+    "./environmentTools": {
+      "types": "./src/environmentTools.ts",
+      "import": "./src/environmentTools.ts"
+    },
+    "./browserNavigationTarget": {
+      "types": "./src/browserNavigationTarget.ts",
+      "import": "./src/browserNavigationTarget.ts"
+    },
     "./backgroundActivitySettings": {
       "types": "./src/backgroundActivitySettings.ts",
       "import": "./src/backgroundActivitySettings.ts"

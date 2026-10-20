@@ -725,6 +725,23 @@ describe("serverSettings helpers", () => {
     expect(Object.keys(removed.usageLimitSources)).toEqual([hubB]);
   });
 
+  it("upserts and removes tools per entry, leaving entries it cannot read untouched", () => {
+    const newerKind = { kind: "simulator", name: "iPhone", device: { platform: "ios" } };
+    const current = {
+      ...DEFAULT_SERVER_SETTINGS,
+      tools: { sim: newerKind, "Bad Key": { kind: "terminal" }, btop: { kind: "terminal" } },
+    };
+    const lazygit = { kind: "terminal" as const, name: "lazygit", command: "lazygit" };
+
+    const added = applyServerSettingsPatch(current, { tools: { lazygit } });
+    expect(Object.keys(added.tools)).toEqual(["sim", "Bad Key", "btop", "lazygit"]);
+    expect(added.tools.sim).toBe(newerKind);
+
+    const removed = applyServerSettingsPatch(added, { tools: { "Bad Key": null, btop: null } });
+    expect(removed.tools).toEqual({ sim: newerKind, lazygit });
+    expect(removed.tools.sim).toBe(newerKind);
+  });
+
   it("replaces and removes individual usage prices without clobbering other models", () => {
     const prices = { inputCostPerMillionTokens: 2, outputCostPerMillionTokens: 8 };
     const current = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {

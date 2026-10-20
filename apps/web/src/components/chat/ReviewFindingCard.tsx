@@ -113,7 +113,7 @@ export function ReviewFindingCard(props: {
   const sendComment = async () => {
     const text = draft.trim();
     if (text.length === 0) return;
-    draftMessageId.current ??= newMessageId();
+    if (draftMessageId.current === null) draftMessageId.current = newMessageId();
     const messageId = draftMessageId.current;
     const sent = await run(() =>
       comment({

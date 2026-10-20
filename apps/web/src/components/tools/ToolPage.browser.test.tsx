@@ -18,10 +18,11 @@ import { DEFAULT_RESOLVED_KEYBINDINGS, isMacPlatform } from "@t3tools/shared/key
 import { injectToolAppBootstrap, TOOL_APP_ESCAPE_MESSAGE_TYPE } from "@t3tools/shared/toolApp";
 import * as Option from "effect/Option";
 import { AsyncResult } from "effect/reactivity";
-import { act, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
+import type { ReactNode } from "react";
+import { expect, it, vi } from "vite-plus/test";
 import { userEvent } from "vite-plus/test/browser";
+
+import { act, fakeTimers, render as renderScreen } from "../../../test/render";
 
 import "~/index.css";
 
@@ -221,7 +222,6 @@ const presentation = (phase: "connected" | "reconnecting" | "offline" | "error")
   serverConfig: { environment: { capabilities: { environmentTools: true } } },
 });
 
-let root: Root;
 let container: HTMLDivElement;
 let shellCommands: string[];
 let paletteCommands: string[];
@@ -241,15 +241,20 @@ function recordPaletteShortcut(event: KeyboardEvent) {
   if (command !== null) paletteCommands.push(command);
 }
 
-async function render() {
-  await act(async () => root.render(<ToolPage environmentId={environmentId} toolId={toolId} />));
+function render() {
+  container = document.createElement("div");
+  container.style.cssText = "display:flex;width:900px;height:600px";
+  return renderScreen(<ToolPage environmentId={environmentId} toolId={toolId} />, { container });
 }
 
 // The launch measures the viewport's grid first, which waits for the terminal fonts.
 async function renderLaunched() {
-  await render();
+  await using stack = new AsyncDisposableStack();
+  const screen = stack.use(await render());
   await vi.waitFor(() => expect(state.open).toHaveBeenCalled());
   await act(async () => {});
+  stack.move();
+  return screen;
 }
 
 function press(target: Element, init: KeyboardEventInit) {
@@ -295,7 +300,7 @@ const exitedSession: TerminalSessionState = {
   },
 };
 
-beforeEach(() => {
+function setup(): Disposable {
   state.row = toolRow(tool);
   state.presentation = presentation("connected");
   state.permission = true;
@@ -316,24 +321,17 @@ beforeEach(() => {
   paletteCommands = [];
   window.addEventListener("keydown", recordShellShortcut, true);
   window.addEventListener("keydown", recordPaletteShortcut);
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  container = document.createElement("div");
-  container.style.cssText = "display:flex;width:900px;height:600px";
-  document.body.append(container);
-  root = createRoot(container);
-});
-
-afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
-  window.removeEventListener("keydown", recordShellShortcut, true);
-  window.removeEventListener("keydown", recordPaletteShortcut);
-  vi.unstubAllGlobals();
-  vi.useRealTimers();
-});
+  return {
+    [Symbol.dispose]() {
+      window.removeEventListener("keydown", recordShellShortcut, true);
+      window.removeEventListener("keydown", recordPaletteShortcut);
+    },
+  };
+}
 
 it("gives the focused TUI every key but the palette escape hatch", async () => {
-  await renderLaunched();
+  using _setup = setup();
+  await using _screen = await renderLaunched();
   expect(state.open).toHaveBeenCalledExactlyOnceWith(openRequest);
   const input = await findTerminalInput();
   // The viewport focuses the surface once its WASM core is up and listening.
@@ -358,7 +356,8 @@ it("gives the focused TUI every key but the palette escape hatch", async () => {
 });
 
 it("relaunches from the exit overlay with Enter", async () => {
-  await renderLaunched();
+  using _setup = setup();
+  await using _screen = await renderLaunched();
   await setSession(exitedSession);
 
   const overlay = container.querySelector<HTMLElement>("[role='dialog']");
@@ -371,7 +370,8 @@ it("relaunches from the exit overlay with Enter", async () => {
 });
 
 it("goes back, without relaunching, on Enter at the overlay's Back button", async () => {
-  await renderLaunched();
+  using _setup = setup();
+  await using _screen = await renderLaunched();
   await setSession(exitedSession);
   const back = [...container.querySelectorAll("button")].find((button) =>
     button.textContent?.startsWith("Back"),
@@ -385,7 +385,8 @@ it("goes back, without relaunching, on Enter at the overlay's Back button", asyn
 });
 
 it("keeps the tool through a reconnect and never restarts one stopped meanwhile", async () => {
-  await renderLaunched();
+  using _setup = setup();
+  await using _screen = await renderLaunched();
   const input = await findTerminalInput();
   expect(state.open).toHaveBeenCalledOnce();
 
@@ -415,7 +416,8 @@ it("keeps the tool through a reconnect and never restarts one stopped meanwhile"
 });
 
 it("shows the environment's failure instead of a tool it cannot reach", async () => {
-  await render();
+  using _setup = setup();
+  await using _screen = await render();
   await findTerminalInput();
 
   await update({ presentation: presentation("error"), row: toolRow(tool, true) });
@@ -424,6 +426,7 @@ it("shows the environment's failure instead of a tool it cannot reach", async ()
 });
 
 it("follows the browser tool's replacement tab and shows stopped only once none is left", async () => {
+  using _setup = setup();
   const browserTool: BrowserEnvironmentTool = {
     kind: "browser",
     name: "Docs",
@@ -452,7 +455,7 @@ it("follows the browser tool's replacement tab and shows stopped only once none 
   const shownTab = () =>
     container.querySelector("[data-preview-tab]")?.getAttribute("data-preview-tab");
 
-  await render();
+  await using _screen = await render();
   await update({ preview: previewWith("tab-a") });
   expect(shownTab()).toBe("tab-a");
 
@@ -488,11 +491,12 @@ const reloadWeb = () => {
 };
 
 it("renders a web app on the selected environment and reloads without terminal controls", async () => {
+  using _setup = setup();
   state.row = toolRow(webTool);
   state.open.mockResolvedValueOnce(webOpened("/api/tool-app/first/"));
   state.open.mockResolvedValueOnce(webOpened("/api/tool-app/second/"));
 
-  await render();
+  await using _screen = await render();
   expect(shownFrame()?.src).toBe("https://devbox.example/api/tool-app/first/");
   expect(shownFrame()?.sandbox.contains("allow-same-origin")).toBe(false);
   expect(container.textContent).not.toContain("Restart");
@@ -510,12 +514,13 @@ it("renders a web app on the selected environment and reloads without terminal c
 });
 
 it("waits for a connected session before opening a web app and relaunches after reconnect", async () => {
+  using _setup = setup();
   state.row = toolRow(webTool);
   state.presentation = presentation("reconnecting");
   state.open.mockResolvedValueOnce(webOpened("/api/tool-app/first/"));
   state.open.mockResolvedValueOnce(webOpened("/api/tool-app/reconnected/"));
 
-  await render();
+  await using _screen = await render();
   expect(state.open).not.toHaveBeenCalled();
   expect(shownFrame()).toBeNull();
 
@@ -533,12 +538,13 @@ it("waits for a connected session before opening a web app and relaunches after 
 });
 
 it("ignores a pending web launch after reload and after permission is revoked", async () => {
+  using _setup = setup();
   state.row = toolRow(webTool);
   const pending = pendingWebOpen();
   state.open.mockReturnValueOnce(pending.promise);
   state.open.mockResolvedValueOnce(webOpened("/api/tool-app/current/"));
 
-  await render();
+  await using _screen = await render();
   expect(container.textContent).toContain("Opening Dashboard…");
   await reloadWeb();
   await act(async () => pending.resolve(webOpened("/api/tool-app/stale/")));
@@ -558,12 +564,13 @@ it("ignores a pending web launch after reload and after permission is revoked", 
 });
 
 it("recovers a failed web launch with Reload and uses a new connection origin", async () => {
+  using _setup = setup();
   state.row = toolRow(webTool);
   state.open.mockResolvedValueOnce(AsyncResult.success({ kind: "browser", tabId: "wrong-kind" }));
   state.open.mockResolvedValueOnce(webOpened("/api/tool-app/recovered/"));
   state.open.mockResolvedValueOnce(webOpened("/api/tool-app/remote/"));
 
-  await render();
+  await using _screen = await render();
   expect(container.textContent).toContain("Couldn't open Dashboard.");
   await reloadWeb();
   expect(shownFrame()?.src).toBe("https://devbox.example/api/tool-app/recovered/");
@@ -573,10 +580,11 @@ it("recovers a failed web launch with Reload and uses a new connection origin", 
 });
 
 it("renames a web app without reopening its frame", async () => {
+  using _setup = setup();
   state.row = toolRow(webTool);
   state.open.mockResolvedValueOnce(webOpened("/api/tool-app/first/"));
   state.open.mockResolvedValueOnce(webOpened("/api/tool-app/reopened/"));
-  await render();
+  await using _screen = await render();
   const initial = shownFrame();
 
   await update({ row: toolRow({ ...webTool, name: "Metrics" }) });
@@ -586,11 +594,12 @@ it("renames a web app without reopening its frame", async () => {
 });
 
 it("opens the edited web target and discards the previous target's pending response", async () => {
+  using _setup = setup();
   state.row = toolRow(webTool);
   const pending = pendingWebOpen();
   state.open.mockReturnValueOnce(pending.promise);
   state.open.mockResolvedValueOnce(webOpened("/api/tool-app/edited/"));
-  await render();
+  await using _screen = await render();
 
   await update({ row: toolRow({ ...webTool, target: { kind: "environment-port", port: 4000 } }) });
   await act(async () => pending.resolve(webOpened("/api/tool-app/outdated/")));
@@ -599,12 +608,13 @@ it("opens the edited web target and discards the previous target's pending respo
 });
 
 it("re-mints the web frame before expiry and cancels renewal on permission loss", async () => {
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  using _setup = setup();
+  using _timers = fakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
   state.row = toolRow(webTool);
   state.open.mockResolvedValueOnce(webOpened("/api/tool-app/first/", Date.now() + 120_000));
   state.open.mockResolvedValueOnce(webOpened("/api/tool-app/renewed/", Date.now() + 240_000));
 
-  await render();
+  await using _screen = await render();
   await act(async () => vi.advanceTimersByTimeAsync(60_000));
   expect(shownFrame()?.src).toBe("https://devbox.example/api/tool-app/renewed/");
   await update({ permission: false });
@@ -614,10 +624,11 @@ it("re-mints the web frame before expiry and cancels renewal on permission loss"
 });
 
 it("returns the focused web app's palette escape to T3 and ignores other message sources", async () => {
+  using _setup = setup();
   const html = injectToolAppBootstrap("<html><body><button autofocus>App</button></body></html>");
   state.row = toolRow(webTool);
   state.open.mockResolvedValue(webOpened(`data:text/html,${encodeURIComponent(html)}`));
-  await render();
+  await using _screen = await render();
   const frame = shownFrame()!;
   await new Promise<void>((resolve) =>
     frame.addEventListener("load", () => resolve(), { once: true }),

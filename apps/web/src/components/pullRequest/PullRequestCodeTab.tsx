@@ -57,6 +57,7 @@ export default function PullRequestCodeTab({
   onAddToAgentSelection?: (input: PullRequestAgentSelectionInput) => void;
   onRefresh: () => void;
   refreshToken?: number;
+  backgroundRefreshToken?: number;
   revealRequest?: { readonly path: string; readonly nonce: number } | null;
 }) {
   const key = JSON.stringify([
@@ -108,77 +109,75 @@ export default function PullRequestCodeTab({
         })
       : null,
   );
-  async function prepareReview() {
+  function prepareReview() {
     if (busy) return;
     setBusy(true);
     setError(null);
-    try {
-      let pending = preparations.get(key);
-      if (!pending) {
-        pending = (async () => {
-          const prepared = await prepare.run({ reference: detail.url, mode: "worktree" });
-          if (prepared._tag === "Failure") throw squashAtomCommandFailure(prepared);
-          if (!prepared.value.isOnPullRequestHead || !prepared.value.worktreePath)
-            throw new Error(
-              "The PR checkout has local changes or stale commits. Clean or update its review worktree, then retry to review the requested PR revision.",
-            );
-          const latestThreads = readThreadShells();
-          const cached = reviews.get(key);
-          if (cached && isArchivedHelixReviewThread(latestThreads, cached.threadRef)) {
-            reviews.delete(key);
-            linkedReviews.delete(key);
-          }
-          const existing = findReusableHelixReviewThread(latestThreads, {
+    let pending = preparations.get(key);
+    if (!pending) {
+      pending = (async () => {
+        const prepared = await prepare.run({ reference: detail.url, mode: "worktree" });
+        if (prepared._tag === "Failure") throw squashAtomCommandFailure(prepared);
+        if (!prepared.value.isOnPullRequestHead || !prepared.value.worktreePath)
+          throw new Error(
+            "The PR checkout has local changes or stale commits. Clean or update its review worktree, then retry to review the requested PR revision.",
+          );
+        const latestThreads = readThreadShells();
+        const cached = reviews.get(key);
+        if (cached && isArchivedHelixReviewThread(latestThreads, cached.threadRef)) {
+          reviews.delete(key);
+          linkedReviews.delete(key);
+        }
+        const existing = findReusableHelixReviewThread(latestThreads, {
+          environmentId,
+          projectId: reference.projectId,
+          cwd: prepared.value.worktreePath,
+          url: detail.url,
+        });
+        let next =
+          reviews.get(key) ??
+          (existing
+            ? {
+                threadRef: { environmentId, threadId: existing.id },
+                cwd: prepared.value.worktreePath,
+              }
+            : undefined);
+        if (!next) {
+          const threadId = ThreadId.make(randomUUID());
+          const created = await create({
             environmentId,
-            projectId: reference.projectId,
-            cwd: prepared.value.worktreePath,
-            url: detail.url,
+            input: {
+              threadId,
+              projectId: reference.projectId,
+              title: `Review ${reference.repository}#${reference.number}`,
+              modelSelection,
+              runtimeMode: DEFAULT_RUNTIME_MODE,
+              interactionMode: "default",
+              branch: prepared.value.branch,
+              worktreePath: prepared.value.worktreePath,
+            },
           });
-          let next =
-            reviews.get(key) ??
-            (existing
-              ? {
-                  threadRef: { environmentId, threadId: existing.id },
-                  cwd: prepared.value.worktreePath,
-                }
-              : undefined);
-          if (!next) {
-            const threadId = ThreadId.make(randomUUID());
-            const created = await create({
-              environmentId,
-              input: {
-                threadId,
-                projectId: reference.projectId,
-                title: `Review ${reference.repository}#${reference.number}`,
-                modelSelection,
-                runtimeMode: DEFAULT_RUNTIME_MODE,
-                interactionMode: "default",
-                branch: prepared.value.branch,
-                worktreePath: prepared.value.worktreePath,
-              },
-            });
-            if (created._tag === "Failure") throw squashAtomCommandFailure(created);
-            const threadRef = { environmentId, threadId };
-            next = { threadRef, cwd: prepared.value.worktreePath };
-            reviews.set(key, next);
-          }
-          await linking.changeLink(next.threadRef, detail.url, true);
-          linkedReviews.add(key);
-          return next;
-        })();
-        preparations.set(key, pending);
-        void pending
-          .finally(() => {
-            if (preparations.get(key) === pending) preparations.delete(key);
-          })
-          .catch(() => {});
-      }
-      setReview(await pending);
-    } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure));
-    } finally {
-      setBusy(false);
+          if (created._tag === "Failure") throw squashAtomCommandFailure(created);
+          const threadRef = { environmentId, threadId };
+          next = { threadRef, cwd: prepared.value.worktreePath };
+          reviews.set(key, next);
+        }
+        await linking.changeLink(next.threadRef, detail.url, true);
+        linkedReviews.add(key);
+        return next;
+      })();
+      preparations.set(key, pending);
+      void pending
+        .finally(() => {
+          if (preparations.get(key) === pending) preparations.delete(key);
+        })
+        .catch(() => {});
     }
+    void pending
+      .then(setReview, (failure: unknown) =>
+        setError(failure instanceof Error ? failure.message : String(failure)),
+      )
+      .finally(() => setBusy(false));
   }
   if (!review)
     return (

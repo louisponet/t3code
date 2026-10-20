@@ -1,9 +1,10 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 import { Atom } from "effect/reactivity";
-import { act, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
+import type { ReactNode } from "react";
+import { expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
+
+import { render } from "../../../test/render";
 
 const state = vi.hoisted(() => ({ writable: new Set<string>() }));
 
@@ -82,35 +83,23 @@ vi.mock(import("./settingsLayout"), async (original) => ({
 
 import { ToolsSettings } from "./ToolsSettings";
 
-let root: Root;
-let container: HTMLDivElement;
-
-const render = () => act(async () => root.render(<ToolsSettings />));
 const addButton = () => page.getByRole("button", { name: "Add tool" });
 
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  state.writable = new Set(["devbox"]);
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-});
-afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
-  vi.unstubAllGlobals();
-});
+function setup(writable: ReadonlyArray<string>) {
+  state.writable = new Set(writable);
+}
 
 it("adds to the first writable environment when the first capable one is read-only", async () => {
-  await render();
+  setup(["devbox"]);
+  await using _screen = await render(<ToolsSettings />);
 
   await userEvent.click(addButton());
   await expect.element(page.getByRole("dialog")).toHaveTextContent("editing devbox");
 });
 
 it("disables Add when no capable environment is writable", async () => {
-  state.writable = new Set();
-  await render();
+  setup([]);
+  await using _screen = await render(<ToolsSettings />);
 
   await expect.element(addButton()).toBeDisabled();
 });

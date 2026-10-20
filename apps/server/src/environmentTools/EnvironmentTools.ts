@@ -437,36 +437,36 @@ const make = Effect.gen(function* () {
     );
 
   // Interrupting this fiber is what drops a stale result: an edited probe gets a new fiber.
-  const probeLoop = (
+  // Untraced: the loop runs for the tool's lifetime, so its span would never end.
+  const probeLoop = Effect.fnUntraced(function* (
     toolId: EnvironmentToolId,
     spec: ProbeSpec,
     refreshes: Queue.Queue<Deferred.Deferred<void>>,
-  ) =>
-    Effect.gen(function* () {
-      let lastRunAt: number | undefined;
-      while (true) {
-        const demanded = yield* SubscriptionRef.get(demand);
-        const now = yield* Clock.currentTimeMillis;
-        const wait = lastRunAt === undefined ? 0 : lastRunAt + spec.intervalMs - now;
-        let joined: ReadonlyArray<Deferred.Deferred<void>> = [];
-        if (!demanded || wait > 0) {
-          const woken = yield* Effect.raceAll([
-            Queue.take(refreshes).pipe(Effect.map((refresh) => [refresh])),
-            demandChangedFrom(demanded).pipe(Effect.as([])),
-            ...(demanded ? [Effect.sleep(wait).pipe(Effect.as([]))] : []),
-          ]);
-          if (woken.length === 0) continue;
-          joined = woken;
-        }
-        lastRunAt = yield* Clock.currentTimeMillis;
-        yield* runProbe(toolId, spec);
-        // Refreshes that arrived while the probe ran joined that run.
-        const pending = [...joined, ...(yield* Queue.clear(refreshes))];
-        yield* Effect.forEach(pending, (refresh) => Deferred.succeed(refresh, undefined), {
-          discard: true,
-        });
+  ) {
+    let lastRunAt: number | undefined;
+    while (true) {
+      const demanded = yield* SubscriptionRef.get(demand);
+      const now = yield* Clock.currentTimeMillis;
+      const wait = lastRunAt === undefined ? 0 : lastRunAt + spec.intervalMs - now;
+      let joined: ReadonlyArray<Deferred.Deferred<void>> = [];
+      if (!demanded || wait > 0) {
+        const woken = yield* Effect.raceAll([
+          Queue.take(refreshes).pipe(Effect.map((refresh) => [refresh])),
+          demandChangedFrom(demanded).pipe(Effect.as([])),
+          ...(demanded ? [Effect.sleep(wait).pipe(Effect.as([]))] : []),
+        ]);
+        if (woken.length === 0) continue;
+        joined = woken;
       }
-    });
+      lastRunAt = yield* Clock.currentTimeMillis;
+      yield* runProbe(toolId, spec);
+      // Refreshes that arrived while the probe ran joined that run.
+      const pending = [...joined, ...(yield* Queue.clear(refreshes))];
+      yield* Effect.forEach(pending, (refresh) => Deferred.succeed(refresh, undefined), {
+        discard: true,
+      });
+    }
+  });
 
   const probeSpecOf = (definition: EnvironmentToolDefinition | undefined): ProbeSpec | undefined =>
     definition?.status === undefined
@@ -556,18 +556,19 @@ const make = Effect.gen(function* () {
         : null;
     });
 
-  const refreshStatus: EnvironmentTools["Service"]["refreshStatus"] = (toolId) =>
-    Effect.gen(function* () {
-      if (!(yield* currentDefinitions).has(toolId)) {
-        return yield* new EnvironmentToolNotFoundError({ toolId });
-      }
-      const slot = (yield* Ref.get(probeSlots)).get(toolId);
-      if (slot === undefined) return;
-      const refresh = yield* Deferred.make<void>();
-      yield* Queue.offer(slot.refreshes, refresh);
-      // An edit replaces the probe's fiber; its end releases waiters it never served.
-      yield* Effect.raceFirst(Deferred.await(refresh), Fiber.await(slot.fiber));
-    });
+  const refreshStatus: EnvironmentTools["Service"]["refreshStatus"] = Effect.fn(
+    "EnvironmentTools.refreshStatus",
+  )(function* (toolId) {
+    if (!(yield* currentDefinitions).has(toolId)) {
+      return yield* new EnvironmentToolNotFoundError({ toolId });
+    }
+    const slot = (yield* Ref.get(probeSlots)).get(toolId);
+    if (slot === undefined) return;
+    const refresh = yield* Deferred.make<void>();
+    yield* Queue.offer(slot.refreshes, refresh);
+    // An edit replaces the probe's fiber; its end releases waiters it never served.
+    yield* Effect.raceFirst(Deferred.await(refresh), Fiber.await(slot.fiber));
+  });
 
   const streamStatus: EnvironmentTools["Service"]["streamStatus"] = Stream.unwrap(
     Effect.gen(function* () {

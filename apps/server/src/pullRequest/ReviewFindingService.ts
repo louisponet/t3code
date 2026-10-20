@@ -173,22 +173,21 @@ const make = Effect.gen(function* () {
       messageRoles: [],
     });
 
-  const requireFinding = (
+  const requireFinding = Effect.fn("ReviewFindingService.requireFinding")(function* (
     input: { readonly threadId: ThreadId; readonly turnItemId: TurnItemId },
     loadFailure: "record_failed" | "send_failed",
-  ) =>
-    Effect.gen(function* () {
-      const records = yield* loadFindings(input.threadId).pipe(
-        Effect.mapError(
-          (error) => new ReviewFindingError({ reason: loadFailure, detail: detailOf(error) }),
-        ),
-      );
-      const item = records.turnItems.find((candidate) => candidate.id === input.turnItemId);
-      if (item?.type !== "review_finding") {
-        return yield* new ReviewFindingError({ reason: "not_found" });
-      }
-      return { projectId: records.thread.projectId, item };
-    });
+  ) {
+    const records = yield* loadFindings(input.threadId).pipe(
+      Effect.mapError(
+        (error) => new ReviewFindingError({ reason: loadFailure, detail: detailOf(error) }),
+      ),
+    );
+    const item = records.turnItems.find((candidate) => candidate.id === input.turnItemId);
+    if (item?.type !== "review_finding") {
+      return yield* new ReviewFindingError({ reason: "not_found" });
+    }
+    return { projectId: records.thread.projectId, item };
+  });
 
   const recordStatus = (input: {
     readonly threadId: ThreadId;
@@ -206,8 +205,10 @@ const make = Effect.gen(function* () {
       Effect.asVoid,
     );
 
-  const report: ReviewFindingService["Service"]["report"] = (input) =>
-    Effect.gen(function* () {
+  const report: ReviewFindingService["Service"]["report"] = Effect.fn(
+    "ReviewFindingService.report",
+  )(
+    function* (input) {
       const records = yield* loadFindings(input.threadId).pipe(
         Effect.mapError(
           (error) =>
@@ -327,10 +328,14 @@ const make = Effect.gen(function* () {
           revised: finding.revised,
         })),
       };
-    }).pipe(inThreadOrder(input.threadId), Effect.withSpan("ReviewFindingService.report"));
+    },
+    (effect, input) => effect.pipe(inThreadOrder(input.threadId)),
+  );
 
-  const setStatus: ReviewFindingService["Service"]["setStatus"] = (input) =>
-    Effect.gen(function* () {
+  const setStatus: ReviewFindingService["Service"]["setStatus"] = Effect.fn(
+    "ReviewFindingService.setStatus",
+  )(
+    function* (input) {
       const { item } = yield* requireFinding(input, "record_failed");
       if (item.findingStatus === "posted") {
         return yield* new ReviewFindingError({ reason: "already_posted" });
@@ -341,27 +346,33 @@ const make = Effect.gen(function* () {
         turnItemId: item.id,
         findingStatus: input.status,
       });
-    }).pipe(inThreadOrder(input.threadId), Effect.withSpan("ReviewFindingService.setStatus"));
+    },
+    (effect, input) => effect.pipe(inThreadOrder(input.threadId)),
+  );
 
   /** Null when the line is not in the diff; the diff arrives a page at a time. */
-  const anchorIn = (ref: PullRequestRef, path: string, line: number, endLine?: number) =>
-    Effect.gen(function* () {
-      let cursor: string | undefined;
-      for (let page = 0; page < MAX_DIFF_PAGES; page++) {
-        const diff = yield* pullRequests.diff({
-          ...ref,
-          ...(cursor === undefined ? {} : { cursor }),
-        });
-        const anchor = reviewFindingPosition(diff.patch, path, line, endLine);
-        if (anchor !== null || patchHasFile(diff.patch, path)) return anchor;
-        if (diff.nextCursor === null) return null;
-        cursor = diff.nextCursor;
-      }
-      return null;
-    });
+  const anchorIn = Effect.fn("ReviewFindingService.anchorIn")(function* (
+    ref: PullRequestRef,
+    path: string,
+    line: number,
+    endLine?: number,
+  ) {
+    let cursor: string | undefined;
+    for (let page = 0; page < MAX_DIFF_PAGES; page++) {
+      const diff = yield* pullRequests.diff({
+        ...ref,
+        ...(cursor === undefined ? {} : { cursor }),
+      });
+      const anchor = reviewFindingPosition(diff.patch, path, line, endLine);
+      if (anchor !== null || patchHasFile(diff.patch, path)) return anchor;
+      if (diff.nextCursor === null) return null;
+      cursor = diff.nextCursor;
+    }
+    return null;
+  });
 
-  const post: ReviewFindingService["Service"]["post"] = (input) =>
-    Effect.gen(function* () {
+  const post: ReviewFindingService["Service"]["post"] = Effect.fn("ReviewFindingService.post")(
+    function* (input) {
       const { projectId, item } = yield* requireFinding(input, "record_failed");
       if (item.findingStatus === "posted") {
         return yield* new ReviewFindingError({ reason: "already_posted" });
@@ -439,29 +450,32 @@ const make = Effect.gen(function* () {
         ),
       );
       return { postedAs };
-    }).pipe(inThreadOrder(input.threadId), Effect.withSpan("ReviewFindingService.post"));
+    },
+    (effect, input) => effect.pipe(inThreadOrder(input.threadId)),
+  );
 
-  const comment: ReviewFindingService["Service"]["comment"] = (input) =>
-    Effect.gen(function* () {
-      const { projectId, item } = yield* requireFinding(input, "send_failed");
-      yield* threadManagement
-        .sendToThread({
-          projectId,
-          commandId: CommandId.make(`review-finding-comment:${input.messageId}`),
-          threadId: input.threadId,
-          messageId: input.messageId,
-          text: reviewFindingAgentMessage(item, input.text),
-          attachments: [],
-          mode: "queue",
-          createdBy: "user",
-          creationSource: input.creationSource,
-        })
-        .pipe(
-          Effect.mapError(
-            (error) => new ReviewFindingError({ reason: "send_failed", detail: detailOf(error) }),
-          ),
-        );
-    }).pipe(Effect.withSpan("ReviewFindingService.comment"));
+  const comment: ReviewFindingService["Service"]["comment"] = Effect.fn(
+    "ReviewFindingService.comment",
+  )(function* (input) {
+    const { projectId, item } = yield* requireFinding(input, "send_failed");
+    yield* threadManagement
+      .sendToThread({
+        projectId,
+        commandId: CommandId.make(`review-finding-comment:${input.messageId}`),
+        threadId: input.threadId,
+        messageId: input.messageId,
+        text: reviewFindingAgentMessage(item, input.text),
+        attachments: [],
+        mode: "queue",
+        createdBy: "user",
+        creationSource: input.creationSource,
+      })
+      .pipe(
+        Effect.mapError(
+          (error) => new ReviewFindingError({ reason: "send_failed", detail: detailOf(error) }),
+        ),
+      );
+  });
 
   return ReviewFindingService.of({ report, setStatus, post, comment });
 });

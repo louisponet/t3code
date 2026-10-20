@@ -9,15 +9,7 @@ import {
 import { useThreadShell } from "~/state/entities";
 import { HelixPrControls } from "./HelixPrControls";
 import { randomUUID } from "~/lib/utils";
-import {
-  useEffect,
-  useLayoutEffect,
-  useEffectEvent,
-  useCallback,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useEffect, useLayoutEffect, useEffectEvent, useRef, useState } from "react";
 import {
   AuthTerminalOperateScope,
   AuthTerminalReadScope,
@@ -117,7 +109,6 @@ export default function HelixPanel({
   const editor = editorOwner?.key === key ? editorOwner.editor : null;
   useEffect(() => {
     if (!canRead || !canOperate || sessions === null) return;
-    void retry;
     const { cwd, worktreePath, threadRef, targetJson, open, write } = launchRequest();
     let cancelled = false;
     let pending = editors.get(key);
@@ -182,7 +173,15 @@ export default function HelixPanel({
     return () => {
       cancelled = true;
     };
-  }, [key, mode, canRead, canOperate, sessions, retry]);
+  }, [
+    key,
+    mode,
+    canRead,
+    canOperate,
+    sessions,
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- A retry relaunches the editor after its terminal stopped before it attached.
+    retry,
+  ]);
   if (!canRead || !canOperate)
     return (
       <p className="p-4 text-sm text-muted-foreground">
@@ -271,11 +270,9 @@ function HelixSession({
   const write = useAtomCommand(terminalEnvironment.write, { reportFailure: false });
   const thread = useThreadShell(threadRef);
   const controllerRef = useHelixReviewController(randomUUID);
-  const output = useMemo(() => {
-    const update = readTerminalOutputUpdate(session.output, INITIAL_TERMINAL_OUTPUT_CURSOR);
-    return update.type === "none" ? "" : update.data;
-  }, [session.output]);
-  const markers = useMemo(() => parseHelixReviewMarkers(output), [output]);
+  const outputUpdate = readTerminalOutputUpdate(session.output, INITIAL_TERMINAL_OUTPUT_CURSOR);
+  const output = outputUpdate.type === "none" ? "" : outputUpdate.data;
+  const markers = parseHelixReviewMarkers(output);
 
   const lifecycle = `${session.lifecycleVersion}:${session.output.generation}`;
   const [readiness, setReadiness] = useState<{ lifecycle: string; nonce: string | null }>({
@@ -346,44 +343,42 @@ function HelixSession({
   useEffect(() => {
     controllerRef.current?.update(target, markers);
   });
-  const send = useCallback(
-    async (action: HelixReviewAction, text?: string) => {
-      const controller = controllerRef.current;
-      if (!controller)
-        throw new Error("The HX editor is still connecting. Retry after it is ready.");
-      const retry = controller.getRetry();
-      if (retry && (retry.action !== action || retry.text !== text))
-        throw new Error(
-          "Retry the previous HX action before starting another action; its delivery has not been confirmed.",
-        );
-      const captured = targetRef.current;
-      if (!captured)
-        throw new Error(
-          "Helix is still starting. If it does not become ready, run hx-t3 setup on this environment.",
-        );
-      setBusy(true);
-      try {
-        const id = await controller.send(captured, action, text, async (data) => {
-          if (
-            targetRef.current?.nonce !== captured.nonce ||
-            targetRef.current?.lifecycleVersion !== captured.lifecycleVersion ||
-            targetRef.current?.attachGeneration !== captured.attachGeneration
-          )
-            return false;
-          const result = await write({
-            environmentId: threadRef.environmentId,
-            input: { threadId: threadRef.threadId, terminalId: editor.terminalId, data },
-          });
-          return result._tag === "Success";
+  const send = async (action: HelixReviewAction, text?: string) => {
+    const controller = controllerRef.current;
+    if (!controller) throw new Error("The HX editor is still connecting. Retry after it is ready.");
+    const retry = controller.getRetry();
+    if (retry && (retry.action !== action || retry.text !== text))
+      throw new Error(
+        "Retry the previous HX action before starting another action; its delivery has not been confirmed.",
+      );
+    const captured = targetRef.current;
+    if (!captured)
+      throw new Error(
+        "Helix is still starting. If it does not become ready, run hx-t3 setup on this environment.",
+      );
+    setBusy(true);
+    return controller
+      .send(captured, action, text, async (data) => {
+        if (
+          targetRef.current?.nonce !== captured.nonce ||
+          targetRef.current?.lifecycleVersion !== captured.lifecycleVersion ||
+          targetRef.current?.attachGeneration !== captured.attachGeneration
+        )
+          return false;
+        const result = await write({
+          environmentId: threadRef.environmentId,
+          input: { threadId: threadRef.threadId, terminalId: editor.terminalId, data },
         });
+        return result._tag === "Success";
+      })
+      .then((id) => {
         if (controllerRef.current === controller) setError(null);
         return id;
-      } finally {
+      })
+      .finally(() => {
         if (controllerRef.current === controller) setBusy(false);
-      }
-    },
-    [controllerRef, write, threadRef.environmentId, threadRef.threadId, editor.terminalId],
-  );
+      });
+  };
   useHelixLocationDelivery({
     controllerRef,
     terminalId: editor.terminalId,

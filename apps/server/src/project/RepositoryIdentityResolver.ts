@@ -1,4 +1,5 @@
 import type { RepositoryIdentity, SourceControlProviderError } from "@t3tools/contracts";
+import { repositoryPathFromRemoteUrl } from "@t3tools/source-control-core/server/SourceControlProvider";
 import {
   detectSourceControlProviderFromGitRemoteUrl,
   normalizeGitRemoteUrl,
@@ -12,6 +13,8 @@ import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 
 import * as ProcessRunner from "../processRunner.ts";
+import { explicitBareRepositoryEnv } from "../vcs/VcsProcess.ts";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 
 const DEFAULT_REPOSITORY_IDENTITY_CACHE_CAPACITY = 512;
 // Background sweeps resolve every project each minute. A long TTL keeps them
@@ -39,15 +42,33 @@ export class RepositoryIdentityResolver extends Context.Service<
   }
 >()("t3/project/RepositoryIdentityResolver") {}
 
+// Local remotes (GitButler's `gb-local` is `.`) name a path on this machine,
+// not a repository, so unrelated repos would share one identity.
+function isLocalRemoteUrl(url: string): boolean {
+  if (/^file:/i.test(url)) return true;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) return false;
+  if (/^[a-z]:[\\/]/i.test(url)) return true;
+  // Git treats `host:path` as scp-style only when the colon precedes any slash.
+  const colonIndex = url.indexOf(":");
+  const slashIndex = url.search(/[\\/]/);
+  return colonIndex === -1 || (slashIndex !== -1 && slashIndex < colonIndex);
+}
+
 function parseRemoteFetchUrls(stdout: string): Map<string, string> {
   const remotes = new Map<string, string>();
   for (const line of stdout.split("\n")) {
     const trimmed = line.trim();
     if (trimmed.length === 0) continue;
-    const match = /^(\S+)\s+(\S+)\s+\((fetch|push)\)$/.exec(trimmed);
+    // Partial clones append the promisor filter, e.g. `(fetch) [blob:none]`.
+    const match = /^(\S+)\s+(\S+)\s+\((fetch|push)\)(?:\s+\[[^\]]+\])?$/.exec(trimmed);
     if (!match) continue;
     const [, remoteName = "", remoteUrl = "", direction = ""] = match;
-    if (direction !== "fetch" || remoteName.length === 0 || remoteUrl.length === 0) {
+    if (
+      direction !== "fetch" ||
+      remoteName.length === 0 ||
+      remoteUrl.length === 0 ||
+      isLocalRemoteUrl(remoteUrl)
+    ) {
       continue;
     }
     remotes.set(remoteName, remoteUrl);
@@ -71,8 +92,10 @@ function pickPrimaryRemote(
   return remoteName && remoteUrl ? { remoteName, remoteUrl } : null;
 }
 
-function repositoryPathOf(canonicalKey: string): string {
-  return canonicalKey.split("/").slice(1).join("/");
+function repositoryPathOf(canonicalKey: string, remoteUrl: string): string {
+  const canonicalPath = canonicalKey.split("/").slice(1).join("/");
+  const displayPath = repositoryPathFromRemoteUrl(remoteUrl);
+  return displayPath?.toLowerCase() === canonicalPath ? displayPath : canonicalPath;
 }
 
 function buildRepositoryOrigin(
@@ -82,7 +105,7 @@ function buildRepositoryOrigin(
   if (!originUrl) return undefined;
   const originKey = normalizeGitRemoteUrl(originUrl);
   if (originKey === canonicalKey) return undefined;
-  const displayName = repositoryPathOf(originKey);
+  const displayName = repositoryPathOf(originKey, originUrl);
   return { canonicalKey: originKey, ...(displayName ? { displayName } : {}) };
 }
 
@@ -94,7 +117,7 @@ function buildRepositoryIdentity(input: {
 }): RepositoryIdentity {
   const canonicalKey = normalizeGitRemoteUrl(input.remoteUrl);
   const sourceControlProvider = detectSourceControlProviderFromGitRemoteUrl(input.remoteUrl);
-  const repositoryPath = repositoryPathOf(canonicalKey);
+  const repositoryPath = repositoryPathOf(canonicalKey, input.remoteUrl);
   const repositoryPathSegments = repositoryPath.split("/").filter((segment) => segment.length > 0);
   const [owner] = repositoryPathSegments;
   const repositoryName = repositoryPathSegments.at(-1);
@@ -116,9 +139,21 @@ function buildRepositoryIdentity(input: {
   };
 }
 
+class RepositoryIdentityCacheKey extends Data.Class<{
+  readonly rootPath: string;
+  readonly isBare: boolean;
+}> {}
+
+class RepositoryRemoteCacheKey extends Data.Class<{
+  readonly rootPath: string;
+  readonly isBare: boolean;
+  readonly preferredRemote: "upstream" | "origin";
+}> {}
+
 const resolveRepositoryIdentityCacheKey = Effect.fn("RepositoryIdentityResolver.resolveCacheKey")(
   function* (cwd: string) {
     const processRunner = yield* ProcessRunner.ProcessRunner;
+    const env = explicitBareRepositoryEnv(process.env, yield* HostProcess.Platform);
 
     // git is a real executable on every platform — no cmd.exe shell mode, which
     // would split paths containing spaces during cmd's re-tokenization.
@@ -126,29 +161,63 @@ const resolveRepositoryIdentityCacheKey = Effect.fn("RepositoryIdentityResolver.
       .run({
         command: "git",
         args: ["-C", cwd, "rev-parse", "--show-toplevel"],
+        env,
         timeoutBehavior: "timedOutResult",
       })
       .pipe(Effect.option);
-    if (topLevelResult._tag === "None" || topLevelResult.value.code !== 0) {
+    if (topLevelResult._tag === "None" || topLevelResult.value.timedOut) {
       return null;
     }
+    if (topLevelResult.value.code === 0) {
+      const rootPath = topLevelResult.value.stdout.trim();
+      return rootPath.length > 0
+        ? new RepositoryIdentityCacheKey({ rootPath, isBare: false })
+        : null;
+    }
 
-    const candidate = topLevelResult.value.stdout.trim();
-    return candidate.length > 0 ? candidate : null;
+    // Explicit Git directories preserve safe.bareRepository=explicit for both layouts.
+    for (const gitDir of [".", ".git"]) {
+      const bareResult = yield* processRunner
+        .run({
+          command: "git",
+          args: [
+            "-C",
+            cwd,
+            `--git-dir=${gitDir}`,
+            "rev-parse",
+            "--is-bare-repository",
+            "--absolute-git-dir",
+          ],
+          env,
+          timeoutBehavior: "timedOutResult",
+        })
+        .pipe(Effect.option);
+      if (bareResult._tag === "None" || bareResult.value.timedOut) return null;
+      if (bareResult.value.code !== 0) continue;
+
+      const [isBare, rootPath = ""] = bareResult.value.stdout
+        .split("\n")
+        .map((line) => line.trim());
+      // A checkout's .git directory contains remotes but is not a project root.
+      return isBare === "true" && rootPath.length > 0
+        ? new RepositoryIdentityCacheKey({ rootPath, isBare: true })
+        : null;
+    }
+    return null;
   },
 );
 
 const resolveRepositoryIdentityFromCacheKey = Effect.fn(
   "RepositoryIdentityResolver.resolveFromCacheKey",
 )(function* (
-  cacheKey: string,
-  preferredRemote: "upstream" | "origin",
+  cacheKey: RepositoryRemoteCacheKey,
 ): Effect.fn.Return<RepositoryIdentity | null, never, ProcessRunner.ProcessRunner> {
   const processRunner = yield* ProcessRunner.ProcessRunner;
   const remoteResult = yield* processRunner
     .run({
       command: "git",
-      args: ["-C", cacheKey, "remote", "-v"],
+      args: ["-C", cacheKey.rootPath, ...(cacheKey.isBare ? ["--git-dir=."] : []), "remote", "-v"],
+      env: explicitBareRepositoryEnv(process.env, yield* HostProcess.Platform),
       timeoutBehavior: "timedOutResult",
     })
     .pipe(Effect.option);
@@ -157,16 +226,15 @@ const resolveRepositoryIdentityFromCacheKey = Effect.fn(
   }
 
   const remotes = parseRemoteFetchUrls(remoteResult.value.stdout);
-  const remote = pickPrimaryRemote(remotes, preferredRemote);
+  const remote = pickPrimaryRemote(remotes, cacheKey.preferredRemote);
   return remote
-    ? buildRepositoryIdentity({ ...remote, originUrl: remotes.get("origin"), rootPath: cacheKey })
+    ? buildRepositoryIdentity({
+        ...remote,
+        originUrl: remotes.get("origin"),
+        rootPath: cacheKey.rootPath,
+      })
     : null;
 });
-
-class RepositoryIdentityCacheKey extends Data.Class<{
-  readonly rootPath: string;
-  readonly preferredRemote: "upstream" | "origin";
-}> {}
 
 export const make = Effect.fn("RepositoryIdentityResolver.make")(function* (
   options: RepositoryIdentityResolverOptions = {},
@@ -183,7 +251,7 @@ export const make = Effect.fn("RepositoryIdentityResolver.make")(function* (
       onFailure: () => Duration.zero,
     });
 
-  const repositoryRootCache = yield* Cache.makeWith<string, string | null>(
+  const repositoryRootCache = yield* Cache.makeWith<string, RepositoryIdentityCacheKey | null>(
     (cwd) =>
       resolveRepositoryIdentityCacheKey(cwd).pipe(
         Effect.provideService(ProcessRunner.ProcessRunner, processRunner),
@@ -192,11 +260,11 @@ export const make = Effect.fn("RepositoryIdentityResolver.make")(function* (
   );
 
   const repositoryIdentityCache = yield* Cache.makeWith<
-    RepositoryIdentityCacheKey,
+    RepositoryRemoteCacheKey,
     RepositoryIdentity | null
   >(
     (cacheKey) =>
-      resolveRepositoryIdentityFromCacheKey(cacheKey.rootPath, cacheKey.preferredRemote).pipe(
+      resolveRepositoryIdentityFromCacheKey(cacheKey).pipe(
         Effect.provideService(ProcessRunner.ProcessRunner, processRunner),
         Effect.filterOrElse(
           (identity): identity is null => identity === null,
@@ -209,10 +277,11 @@ export const make = Effect.fn("RepositoryIdentityResolver.make")(function* (
   const resolve: RepositoryIdentityResolver["Service"]["resolve"] = Effect.fnUntraced(
     function* (cwd, options) {
       if (options?.refresh) yield* Cache.invalidate(repositoryRootCache, cwd);
-      const rootPath = yield* Cache.get(repositoryRootCache, cwd);
-      if (rootPath === null) return null;
-      const cacheKey = new RepositoryIdentityCacheKey({
-        rootPath,
+      const root = yield* Cache.get(repositoryRootCache, cwd);
+      if (root === null) return null;
+      const cacheKey = new RepositoryRemoteCacheKey({
+        rootPath: root.rootPath,
+        isBare: root.isBare,
         preferredRemote: options?.preferredRemote ?? "upstream",
       });
       if (options?.refresh) yield* Cache.invalidate(repositoryIdentityCache, cacheKey);

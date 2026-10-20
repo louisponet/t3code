@@ -125,19 +125,21 @@ export function useHelixPrReview(input: {
       );
     return next;
   };
-  const run = async <A>(operation: () => Promise<A>) => {
-    if (pending.current) return;
+  const run = <A>(operation: () => Promise<A>): Promise<A | undefined> => {
+    if (pending.current) return Promise.resolve(undefined);
     pending.current = true;
     setBusy(true);
     setError(null);
-    try {
-      return await operation();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not update the HX review.");
-    } finally {
-      pending.current = false;
-      setBusy(false);
-    }
+    return Promise.resolve()
+      .then(operation)
+      .catch((cause: unknown) => {
+        setError(cause instanceof Error ? cause.message : "Could not update the HX review.");
+        return undefined;
+      })
+      .finally(() => {
+        pending.current = false;
+        setBusy(false);
+      });
   };
   const request = async (
     captured: Session,
@@ -261,9 +263,9 @@ export function useHelixPrReview(input: {
         throw new Error("Add a summary before requesting changes.");
       setPreview(frozen);
     });
-  const cleanup = async (captured: Session, outcome: Submission) => {
+  const cleanup = (captured: Session, outcome: Submission) => {
     const scope = submissionKey(captured.target);
-    try {
+    return (async () => {
       currentTarget(captured);
       if (latest.current.controls.canRetry) {
         if (
@@ -273,12 +275,12 @@ export function useHelixPrReview(input: {
           throw new Error("Retry the previous HX action before syncing submitted drafts.");
       } else await request(captured, "pr-complete", { revision: outcome.preview.review.revision });
       setSubmission(scope, { ...outcome, cleaned: true });
-    } catch (cause) {
+    })().catch((cause: unknown) => {
       throw new Error(
         `Review submitted. HX drafts were kept because cleanup was not confirmed. ${cause instanceof Error ? cause.message : "Try syncing the drafts again."}`,
         { cause },
       );
-    }
+    });
   };
   const performSubmit = () =>
     void run(async () => {
@@ -307,14 +309,19 @@ export function useHelixPrReview(input: {
       const initial: Submission = { status: "submitting", preview, cleaned: false };
       if (appAtomRegistry.get(submissionsAtom).has(scope)) return;
       setSubmission(scope, initial);
-      try {
-        const response = await submitReview({
-          ...target,
-          input: { ...target.input, ...preview.input },
-        });
-        if (response._tag === "Failure") throw squashAtomCommandFailure(response);
-      } catch (cause) {
+      const submitted = await submitReview({
+        ...target,
+        input: { ...target.input, ...preview.input },
+      }).then(
+        (response) =>
+          response._tag === "Failure"
+            ? { ok: false as const, cause: squashAtomCommandFailure(response) }
+            : { ok: true as const },
+        (cause: unknown) => ({ ok: false as const, cause }),
+      );
+      if (!submitted.ok) {
         setSubmission(scope, { ...initial, status: "uncertain" });
+        const { cause } = submitted;
         throw new Error(
           `Could not confirm review submission. Check the pull request before posting again. ${cause instanceof Error ? cause.message : "Your HX drafts are kept."}`,
           { cause },

@@ -114,118 +114,116 @@ export function HelixPullRequestFileScreen(props: {
     launched.current = key;
     const pr = detail.data;
     void (async () => {
-      try {
-        if (
-          !readEnvironmentScope(target.environmentId, AuthTerminalReadScope) ||
-          !readEnvironmentScope(target.environmentId, AuthTerminalOperateScope)
-        )
-          throw new Error("Opening Helix requires terminal read and operate access.");
-        const os = config.environment.platform.os;
-        if (os !== "linux" && os !== "darwin")
-          throw new Error("Helix requires a Linux or macOS host.");
-        if (params.commit && !commitDiff.data?.helixComparison)
-          throw new Error(
-            "This server did not provide exact parent and commit revisions. Update the server to review this commit in Helix.",
-          );
-        const modelSelection = resolveSelectableModelSelection(config, null, project.id);
-        if (!modelSelection && !reuseId)
-          throw new Error(
-            "Choose an available model for this project before creating a review thread.",
-          );
-        let threadId = reuseId ?? ThreadId.make(uuidv4());
-        const prepared = await prepare({
-          environmentId: target.environmentId,
-          input: { cwd: project.workspaceRoot, reference: pr.url, mode: "worktree", threadId },
-        });
-        if (prepared._tag !== "Success")
-          throw new Error(
-            "Could not prepare this PR worktree. Check source control permissions and connection.",
-          );
-        if (!prepared.value.worktreePath || !prepared.value.isOnPullRequestHead)
-          throw new Error(
-            "The PR worktree has local changes and could not update to the PR head. Resolve them before reviewing.",
-          );
-        if (currentKey.current !== key) return;
-        const reusable =
-          cached ??
-          (candidate?.worktreePath === prepared.value.worktreePath &&
-          candidate.branch === prepared.value.branch
-            ? candidate
-            : null);
-        if (!reusable) {
-          if (!modelSelection)
-            throw new Error("Choose an available model before creating a PR review thread.");
-          if (reuseId) threadId = ThreadId.make(uuidv4());
-          const created = await create({
-            environmentId: target.environmentId,
-            input: {
-              threadId,
-              projectId: project.id,
-              title: `Review #${pr.number}: ${pr.title}`,
-              modelSelection,
-              runtimeMode: "approval-required",
-              interactionMode: "default",
-              branch: prepared.value.branch,
-              worktreePath: prepared.value.worktreePath,
-            },
-          });
-          if (created._tag !== "Success") throw new Error("Could not create the PR review thread.");
-        }
-        reviewThreads.set(reviewKey, {
-          threadId,
-          worktreePath: prepared.value.worktreePath,
-          branch: prepared.value.branch,
-        });
-        if (currentKey.current !== key) return;
-        const parsed = parseChangeRequestUrl(pr.url);
-        if (!parsed) throw new Error("The PR URL could not be linked to this review thread.");
-        const linked = await link({
+      if (
+        !readEnvironmentScope(target.environmentId, AuthTerminalReadScope) ||
+        !readEnvironmentScope(target.environmentId, AuthTerminalOperateScope)
+      )
+        throw new Error("Opening Helix requires terminal read and operate access.");
+      const os = config.environment.platform.os;
+      if (os !== "linux" && os !== "darwin")
+        throw new Error("Helix requires a Linux or macOS host.");
+      if (params.commit && !commitDiff.data?.helixComparison)
+        throw new Error(
+          "This server did not provide exact parent and commit revisions. Update the server to review this commit in Helix.",
+        );
+      const modelSelection = resolveSelectableModelSelection(config, null, project.id);
+      if (!modelSelection && !reuseId)
+        throw new Error(
+          "Choose an available model for this project before creating a review thread.",
+        );
+      let threadId = reuseId ?? ThreadId.make(uuidv4());
+      const prepared = await prepare({
+        environmentId: target.environmentId,
+        input: { cwd: project.workspaceRoot, reference: pr.url, mode: "worktree", threadId },
+      });
+      if (prepared._tag !== "Success")
+        throw new Error(
+          "Could not prepare this PR worktree. Check source control permissions and connection.",
+        );
+      if (!prepared.value.worktreePath || !prepared.value.isOnPullRequestHead)
+        throw new Error(
+          "The PR worktree has local changes and could not update to the PR head. Resolve them before reviewing.",
+        );
+      if (currentKey.current !== key) return;
+      const reusable =
+        cached ??
+        (candidate?.worktreePath === prepared.value.worktreePath &&
+        candidate.branch === prepared.value.branch
+          ? candidate
+          : null);
+      if (!reusable) {
+        if (!modelSelection)
+          throw new Error("Choose an available model before creating a PR review thread.");
+        if (reuseId) threadId = ThreadId.make(uuidv4());
+        const created = await create({
           environmentId: target.environmentId,
           input: {
             threadId,
-            ...normalizeThreadPullRequestKey(parsed),
-            url: pr.url,
-            source: "manual",
-          },
-        });
-        if (linked._tag !== "Success")
-          throw new Error("Could not link this PR to the review thread.");
-        if (currentKey.current !== key) return;
-        const launch = prepareCoordinatedHelixReviewLaunch({
-          threadRef: { environmentId: EnvironmentId.make(params.environmentId), threadId },
-          workspaceRoot: project.workspaceRoot,
-          threadShellWorktreePath: prepared.value.worktreePath,
-          threadDetailWorktreePath: prepared.value.worktreePath,
-          sessions: known.sessions ?? [],
-          uniqueSuffix: uuidv4(),
-          options: {
-            mode: "review",
-            ...(params.commit ? commitDiff.data?.helixComparison : {}),
-            filePath: params.path,
-            ...(params.focus ? { line: params.focus.start, side: params.focus.side } : {}),
+            projectId: project.id,
+            title: `Review #${pr.number}: ${pr.title}`,
+            modelSelection,
+            runtimeMode: "approval-required",
+            interactionMode: "default",
+            branch: prepared.value.branch,
             worktreePath: prepared.value.worktreePath,
           },
         });
-        if (launch.launch)
-          stagePendingTerminalLaunch({ target: launch.target, launch: launch.launch });
-        else
-          stageHelixOpen(launch.target, {
-            mode: "review",
-            ...(params.commit ? commitDiff.data?.helixComparison : {}),
-            filePath: params.path,
-            ...(params.focus ? { line: params.focus.start, side: params.focus.side } : {}),
-            worktreePath: prepared.value.worktreePath,
-          });
-        navigation.navigate("ThreadTerminal", {
-          environmentId: params.environmentId,
-          threadId: String(threadId),
-          terminalId: launch.target.terminalId,
-        });
-      } catch (cause) {
-        if (currentKey.current !== key) return;
-        setError(cause instanceof Error ? cause.message : "Could not open this PR in Helix.");
+        if (created._tag !== "Success") throw new Error("Could not create the PR review thread.");
       }
-    })();
+      reviewThreads.set(reviewKey, {
+        threadId,
+        worktreePath: prepared.value.worktreePath,
+        branch: prepared.value.branch,
+      });
+      if (currentKey.current !== key) return;
+      const parsed = parseChangeRequestUrl(pr.url);
+      if (!parsed) throw new Error("The PR URL could not be linked to this review thread.");
+      const linked = await link({
+        environmentId: target.environmentId,
+        input: {
+          threadId,
+          ...normalizeThreadPullRequestKey(parsed),
+          url: pr.url,
+          source: "manual",
+        },
+      });
+      if (linked._tag !== "Success")
+        throw new Error("Could not link this PR to the review thread.");
+      if (currentKey.current !== key) return;
+      const launch = prepareCoordinatedHelixReviewLaunch({
+        threadRef: { environmentId: EnvironmentId.make(params.environmentId), threadId },
+        workspaceRoot: project.workspaceRoot,
+        threadShellWorktreePath: prepared.value.worktreePath,
+        threadDetailWorktreePath: prepared.value.worktreePath,
+        sessions: known.sessions ?? [],
+        uniqueSuffix: uuidv4(),
+        options: {
+          mode: "review",
+          ...(params.commit ? commitDiff.data?.helixComparison : {}),
+          filePath: params.path,
+          ...(params.focus ? { line: params.focus.start, side: params.focus.side } : {}),
+          worktreePath: prepared.value.worktreePath,
+        },
+      });
+      if (launch.launch)
+        stagePendingTerminalLaunch({ target: launch.target, launch: launch.launch });
+      else
+        stageHelixOpen(launch.target, {
+          mode: "review",
+          ...(params.commit ? commitDiff.data?.helixComparison : {}),
+          filePath: params.path,
+          ...(params.focus ? { line: params.focus.start, side: params.focus.side } : {}),
+          worktreePath: prepared.value.worktreePath,
+        });
+      navigation.navigate("ThreadTerminal", {
+        environmentId: params.environmentId,
+        threadId: String(threadId),
+        terminalId: launch.target.terminalId,
+      });
+    })().catch((cause: unknown) => {
+      if (currentKey.current !== key) return;
+      setError(cause instanceof Error ? cause.message : "Could not open this PR in Helix.");
+    });
   }, [
     key,
     project,

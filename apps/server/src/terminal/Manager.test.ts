@@ -2,6 +2,8 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
   DEFAULT_TERMINAL_ID,
+  ENVIRONMENT_TOOL_TERMINAL_ID,
+  type TerminalAttachInput,
   type TerminalAttachStreamEvent,
   type TerminalEvent,
   type TerminalMetadataStreamEvent,
@@ -69,6 +71,7 @@ class FakePtyProcess implements PtyAdapter.PtyProcess {
   killed = false;
   exitOnSubscribe: PtyAdapter.PtyExitEvent | undefined;
   onKill: ((signal?: string) => void) | undefined;
+  onResize: ((cols: number, rows: number) => void) | undefined;
 
   constructor(pid: number) {
     this.pid = pid;
@@ -86,6 +89,7 @@ class FakePtyProcess implements PtyAdapter.PtyProcess {
       throw this.resizeFailure;
     }
     this.resizeCalls.push({ cols, rows });
+    this.onResize?.(cols, rows);
   }
 
   kill(signal?: string): void {
@@ -211,6 +215,36 @@ function restartInput(overrides: Partial<TerminalRestartInput> = {}): TerminalRe
     ...overrides,
   };
 }
+
+type ToolOpenInput = Parameters<TerminalManager.TerminalManager["Service"]["openTool"]>[0];
+
+function toolInput(overrides: Partial<ToolOpenInput> = {}): ToolOpenInput {
+  return {
+    threadId: "tool:lazygit",
+    terminalId: ENVIRONMENT_TOOL_TERMINAL_ID,
+    cwd: process.cwd(),
+    command: "lazygit",
+    cols: 100,
+    rows: 24,
+    ...overrides,
+  };
+}
+
+const exitProcess = (
+  manager: TerminalManager.TerminalManager["Service"],
+  process: FakePtyProcess,
+  event: PtyAdapter.PtyExitEvent,
+) =>
+  Effect.gen(function* () {
+    const exited = yield* Deferred.make<void>();
+    const unsubscribe = yield* manager.subscribe((terminalEvent) =>
+      terminalEvent.type === "exited"
+        ? Deferred.succeed(exited, undefined).pipe(Effect.asVoid)
+        : Effect.void,
+    );
+    process.emitExit(event);
+    yield* Deferred.await(exited).pipe(Effect.ensuring(Effect.sync(unsubscribe)));
+  });
 
 const historyLogPath = (logsDir: string, threadId = "thread-1") =>
   Effect.service(Path.Path).pipe(
@@ -414,6 +448,52 @@ it("bounds long partial lines and joins surrogate pairs across chunk boundaries"
     expect(history.value()).toBe(expected);
     expect(Buffer.byteLength(history.value())).toBeLessThanOrEqual(maxBytes);
   }
+});
+
+it("prefixes the modes in effect where the retained history starts", () => {
+  const history = new TerminalManager.BoundedTerminalHistory(3, "$ ls\nfile\n");
+  history.append("\u001b[?1049h\u001b[?25lvim");
+  expect(history.modePrefix()).toBe("");
+
+  history.append("\n~\n~\n~\n");
+  expect(history.value()).toBe("~\n~\n~\n");
+  expect(history.modePrefix()).toBe("\u001b[?25l\u001b[?1049h");
+
+  history.append("\u001b[?1049l\u001b[?25h$ ");
+  history.clear();
+  expect(history.modePrefix()).toBe("");
+  history.append("\u001b[?1000h");
+  history.clear();
+  expect(history.modePrefix()).toBe("\u001b[?1000h");
+  history.resetModes();
+  expect(history.modePrefix()).toBe("");
+});
+
+it("folds a mode change cut by the trim boundary once its tail is dropped too", () => {
+  const history = new TerminalManager.BoundedTerminalHistory(5_000, "", 6);
+  history.append("ab\u001b[?1049h");
+  expect(history.value()).toBe("?1049h");
+  expect(history.modePrefix()).toBe("");
+
+  history.append("cd");
+  expect(history.value()).toBe("049hcd");
+  expect(history.modePrefix()).toBe("");
+
+  history.append("efgh");
+  expect(history.value()).toBe("cdefgh");
+  expect(history.modePrefix()).toBe("\u001b[?1049h");
+});
+
+it("resets tracked modes on RIS and cursor modes on DECSTR", () => {
+  const trimmed = (text: string) => {
+    const history = new TerminalManager.BoundedTerminalHistory(1, text + "\n$ ");
+    return history.modePrefix();
+  };
+  expect(trimmed("\u001b[?1h\u001b[?25l\u001b[?1049h\u001b[?1000;1006h")).toBe(
+    "\u001b[?1h\u001b[?25l\u001b[?1049h\u001b[?1000h\u001b[?1006h",
+  );
+  expect(trimmed("\u001b[?1049h\u001b[?1000;1006h\u001bc")).toBe("");
+  expect(trimmed("\u001b[?1h\u001b[?25l\u001b[?1049h\u001b[!p")).toBe("\u001b[?1049h");
 });
 
 it("preserves retained lines as older storage is compacted", () => {
@@ -2334,6 +2414,7 @@ it.layer(
         updateProviderInstance: () => Effect.fail(settingsError),
         withSettingsSnapshot: () => Effect.fail(settingsError),
         streamChanges: Stream.empty,
+        settingsFileTrusted: Effect.fail(settingsError),
         subscribeChanges: Effect.succeed(Stream.empty),
       });
 
@@ -3005,6 +3086,236 @@ it.layer(
       expect(snapshot).toBeDefined();
       if (!snapshot || snapshot.type !== "snapshot") return;
       expect(snapshot.snapshot.sequence).toBe(4);
+    }),
+  );
+
+  it.effect("runs tool commands through an interactive shell and relaunches only the command", () =>
+    Effect.gen(function* () {
+      if ((yield* HostProcess.Platform) === "win32") return;
+      const { manager, ptyAdapter } = yield* createManager(5, {
+        shellResolver: () => "/bin/bash",
+      });
+
+      const first = yield* manager.openTool(toolInput());
+      assert.equal(first.status, "running");
+      expect(ptyAdapter.spawnInputs[0]).toMatchObject({
+        shell: "/bin/bash",
+        args: ["-ic", "lazygit"],
+        cols: 100,
+        rows: 24,
+      });
+
+      yield* manager.openTool(toolInput({ command: "lazygit --edited", cwd: "/" }));
+      expect(ptyAdapter.spawnInputs).toHaveLength(1);
+
+      yield* exitProcess(manager, ptyAdapter.processes[0]!, { exitCode: 0, signal: 0 });
+      const relaunched = yield* manager.openTool(toolInput({ command: "lazygit --edited" }));
+      assert.equal(relaunched.status, "running");
+      yield* manager.openTool(toolInput({ command: "lazygit --restarted", restart: true }));
+      expect(ptyAdapter.spawnInputs.map((input) => input.args)).toEqual([
+        ["-ic", "lazygit"],
+        ["-ic", "lazygit --edited"],
+        ["-ic", "lazygit --restarted"],
+      ]);
+
+      yield* manager.open(openInput());
+      expect(ptyAdapter.spawnInputs[3]?.args).toBeUndefined();
+      expect(ptyAdapter.spawnInputs[0]?.env).toEqual(ptyAdapter.spawnInputs[3]?.env);
+    }),
+  );
+
+  it.effect("reserves tool threads: public open and restart fail, attach never spawns", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter } = yield* createManager();
+      const toolThread = { threadId: "tool:lazygit", terminalId: ENVIRONMENT_TOOL_TERMINAL_ID };
+
+      expect(yield* Effect.flip(manager.open(openInput(toolThread)))).toMatchObject({
+        _tag: "TerminalReservedThreadError",
+        threadId: "tool:lazygit",
+      });
+      expect(yield* Effect.flip(manager.restart(restartInput(toolThread)))).toMatchObject({
+        _tag: "TerminalReservedThreadError",
+      });
+      const missing = yield* Effect.flip(
+        manager.attachStream(
+          { ...openInput(toolThread), restartIfNotRunning: true },
+          () => Effect.void,
+        ),
+      );
+      expect(missing._tag).toBe("TerminalSessionLookupError");
+      expect(ptyAdapter.spawnInputs).toEqual([]);
+
+      yield* manager.openTool(toolInput());
+      yield* exitProcess(manager, ptyAdapter.processes[0]!, { exitCode: 1, signal: 0 });
+      const events: TerminalAttachStreamEvent[] = [];
+      const unsubscribe = yield* manager.attachStream(
+        { ...openInput({ ...toolThread, cwd: "/" }), restartIfNotRunning: true },
+        (event) =>
+          Effect.sync(() => {
+            events.push(event);
+          }),
+      );
+      unsubscribe();
+      expect(events).toMatchObject([{ type: "snapshot", snapshot: { status: "exited" } }]);
+      expect(ptyAdapter.spawnInputs).toHaveLength(1);
+    }),
+  );
+
+  it.effect("keeps tool history in memory only and caps it at 512 KiB", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter, logsDir } = yield* createManager();
+      const historyPath = yield* multiTerminalHistoryLogPath(
+        logsDir,
+        "tool:lazygit",
+        ENVIRONMENT_TOOL_TERMINAL_ID,
+      );
+      yield* writeFileString(historyPath, "screen of a dead TUI");
+
+      expect((yield* manager.openTool(toolInput())).history).toBe("");
+      ptyAdapter.processes[0]!.emitData(
+        "\u001b[?1;47;1047;1049;1000;1002;1003;1005;1006;1015;2004h\u001b[?25l" +
+          "x".repeat(600 * 1024),
+      );
+      const longestPrefix =
+        "\u001b[?1h\u001b[?25l\u001b[?47h\u001b[?1047h\u001b[?1049h\u001b[?1000h\u001b[?1002h" +
+        "\u001b[?1003h\u001b[?1005h\u001b[?1006h\u001b[?1015h\u001b[?2004h";
+      // The client keeps the last 512 KiB, so the longest prefix must fit with the history.
+      expect((yield* manager.openTool(toolInput())).history).toBe(
+        longestPrefix + "x".repeat(512 * 1024 - longestPrefix.length),
+      );
+
+      yield* manager.close({ threadId: "tool:lazygit", terminalId: ENVIRONMENT_TOOL_TERMINAL_ID });
+      expect(yield* readFileString(historyPath)).toBe("screen of a dead TUI");
+    }),
+  );
+
+  it.effect(
+    "nudges a running tool to redraw and restores its size after the TUI sees the nudge",
+    () =>
+      Effect.gen(function* () {
+        const { manager, ptyAdapter } = yield* createManager(5, { processKillGraceMs: 0 });
+        const attach = (input: TerminalAttachInput) =>
+          manager.attachStream(input, () => Effect.void).pipe(Effect.map((stop) => stop()));
+        const toolThread = { threadId: "tool:lazygit", terminalId: ENVIRONMENT_TOOL_TERMINAL_ID };
+        yield* manager.openTool(toolInput());
+        const tool = ptyAdapter.processes[0]!;
+        const nextResize = Effect.gen(function* () {
+          const resized = yield* Deferred.make<{ cols: number; rows: number }>();
+          tool.onResize = (cols, rows) =>
+            Deferred.doneUnsafe(resized, Effect.succeed({ cols, rows }));
+          return resized;
+        });
+
+        yield* attach({ ...toolThread, cols: 100, rows: 24 });
+        expect(tool.resizeCalls).toEqual([{ cols: 100, rows: 23 }]);
+        const restoredOnOutput = yield* nextResize;
+        tool.emitData("repainted at 23 rows");
+        expect(yield* Deferred.await(restoredOnOutput)).toEqual({ cols: 100, rows: 24 });
+
+        yield* attach({ ...toolThread, cols: 100, rows: 24 });
+        const restoredOnDelay = yield* nextResize;
+        yield* TestClock.adjust("99 millis");
+        expect(tool.resizeCalls.at(-1)).toEqual({ cols: 100, rows: 23 });
+        yield* TestClock.adjust("1 millis");
+        expect(yield* Deferred.await(restoredOnDelay)).toEqual({ cols: 100, rows: 24 });
+
+        // A real resize while the restore is pending wins over the stale restore.
+        yield* attach({ ...toolThread, cols: 100, rows: 24 });
+        yield* manager.resize({ ...toolThread, cols: 120, rows: 30 });
+        tool.emitData("repainted at 30 rows");
+        yield* attach({ ...toolThread, cols: 120, rows: 30 });
+        const restoredAfterResize = yield* nextResize;
+        tool.emitData("repainted at 29 rows");
+        expect(yield* Deferred.await(restoredAfterResize)).toEqual({ cols: 120, rows: 30 });
+        expect(tool.resizeCalls.slice(2)).toEqual([
+          { cols: 100, rows: 23 },
+          { cols: 100, rows: 24 },
+          { cols: 100, rows: 23 },
+          { cols: 120, rows: 30 },
+          { cols: 120, rows: 29 },
+          { cols: 120, rows: 30 },
+        ]);
+      }).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("keeps the true size for a sizeless attach or restart while a nudge is pending", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter } = yield* createManager(5, { processKillGraceMs: 0 });
+      const toolThread = { threadId: "tool:lazygit", terminalId: ENVIRONMENT_TOOL_TERMINAL_ID };
+      const attach = (input: TerminalAttachInput) =>
+        manager.attachStream(input, () => Effect.void).pipe(Effect.map((stop) => stop()));
+      yield* manager.openTool(toolInput());
+
+      yield* attach({ ...toolThread, cols: 100, rows: 24 });
+      // The tool page attaches without a size.
+      yield* attach(toolThread);
+      expect(ptyAdapter.processes[0]!.resizeCalls).toEqual([
+        { cols: 100, rows: 23 },
+        { cols: 100, rows: 23 },
+      ]);
+
+      yield* manager.openTool({
+        ...toolThread,
+        cwd: process.cwd(),
+        command: "lazygit",
+        restart: true,
+      });
+      expect(ptyAdapter.spawnInputs.at(-1)).toMatchObject({ cols: 100, rows: 24 });
+    }).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("never nudges a plain shell attached at the same size", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter } = yield* createManager();
+      yield* manager.open(openInput());
+      const stop = yield* manager.attachStream(openInput(), () => Effect.void);
+      stop();
+      expect(ptyAdapter.processes[0]!.resizeCalls).toEqual([]);
+    }),
+  );
+
+  it.effect("prefixes live snapshots with private modes the trimmed history no longer sets", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter } = yield* createManager(3);
+      yield* manager.open(openInput());
+      const shell = ptyAdapter.processes[0]!;
+
+      shell.emitData("\u001b[?10");
+      shell.emitData("49h\u001b[?1000;1006h\u001b[?25l");
+      shell.emitData("\u001b[?1000l1\n2\n3\n4\n");
+      expect((yield* manager.open(openInput())).history).toBe(
+        "\u001b[?25l\u001b[?1049h\u001b[?1006h2\n3\n4\n",
+      );
+
+      yield* manager.close({ threadId: "thread-1" });
+      expect((yield* manager.open(openInput())).history).toBe("2\n3\n4\n");
+    }),
+  );
+
+  it.effect("replays an untrimmed history without a mode prefix", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter } = yield* createManager();
+      yield* manager.open(openInput());
+
+      ptyAdapter.processes[0]!.emitData("$ ls\nfile\n$ vim\n\u001b[?1049h\u001b[?25lvim screen");
+      expect((yield* manager.open(openInput())).history).toBe(
+        "$ ls\nfile\n$ vim\n\u001b[?1049h\u001b[?25lvim screen",
+      );
+    }),
+  );
+
+  it.effect("keeps live modes across clear and drops them when a new process starts", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter } = yield* createManager();
+      yield* manager.openTool(toolInput());
+      const toolThread = { threadId: "tool:lazygit", terminalId: ENVIRONMENT_TOOL_TERMINAL_ID };
+
+      ptyAdapter.processes[0]!.emitData("\u001b[?1049h\u001b[?1000hscreen");
+      yield* manager.clear(toolThread);
+      expect((yield* manager.openTool(toolInput())).history).toBe("\u001b[?1049h\u001b[?1000h");
+
+      const restarted = yield* manager.openTool(toolInput({ restart: true }));
+      expect(restarted.history).toBe("");
     }),
   );
 

@@ -364,10 +364,22 @@ export class TerminalResizeError extends Schema.TaggedError<TerminalResizeError>
   }
 }
 
+export class TerminalReservedThreadError extends Schema.TaggedError<TerminalReservedThreadError>()(
+  "TerminalReservedThreadError",
+  {
+    threadId: Schema.String,
+  },
+) {
+  override get message() {
+    return `Terminal thread is reserved for environment tools: ${this.threadId}`;
+  }
+}
+
 export const TerminalError = Schema.Union([
   TerminalCwdError,
   TerminalHistoryError,
   TerminalSessionLookupError,
+  TerminalReservedThreadError,
   TerminalProviderInstanceNotFoundError,
   TerminalProviderEnvironmentError,
   TerminalNotRunningError,

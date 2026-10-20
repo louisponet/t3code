@@ -114,6 +114,11 @@ const LATE_DEFAULT_KEYBINDINGS: ReadonlyArray<{
       when: "composerFocus && draftThreadRoute",
     },
   },
+  {
+    id: "commandPalette.toggle:toolFocus",
+    alongside: { key: "mod+k", command: "commandPalette.toggle", when: "!terminalFocus" },
+    rule: { key: "mod+shift+k", command: "commandPalette.toggle", when: "toolFocus" },
+  },
 ];
 
 function keybindingShortcutContext(rule: KeybindingRule): string | null {

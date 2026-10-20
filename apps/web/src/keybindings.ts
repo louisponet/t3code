@@ -3,8 +3,10 @@ import {
   type KeybindingShortcut,
   type KeybindingWhenNode,
   MODEL_PICKER_JUMP_KEYBINDING_COMMANDS,
+  type ResolvedKeybindingRule,
   type ResolvedKeybindingsConfig,
   THREAD_JUMP_KEYBINDING_COMMANDS,
+  TOOL_OPEN_COMMAND_PATTERN,
   type ModelPickerJumpKeybindingCommand,
   type ThreadJumpKeybindingCommand,
 } from "@t3tools/contracts";
@@ -17,7 +19,9 @@ import {
   type ShortcutEventLike,
   type ShortcutModifierStateLike,
 } from "@t3tools/shared/keybindings";
+import * as Schema from "effect/Schema";
 import { isElectron } from "./env";
+import { getTerminalFocusOwner } from "./lib/terminalFocus";
 import { projectScriptIdFromCommand } from "./projectScripts";
 
 export type { ShortcutEventLike, ShortcutModifierStateLike } from "@t3tools/shared/keybindings";
@@ -31,6 +35,8 @@ export interface ShortcutMatchContext {
   isWeb: boolean;
   isDesktop: boolean;
   editableFocus?: boolean;
+  /** A tool's TUI has focus. Resolving a key event reads it from the DOM unless given. */
+  toolFocus?: boolean;
   [key: string]: boolean;
 }
 
@@ -88,6 +94,36 @@ function matchesWhenClause(
   return evaluateWhenNode(whenAst, context);
 }
 
+function whenReferences(node: KeybindingWhenNode, name: string): boolean {
+  switch (node.type) {
+    case "identifier":
+      return node.name === name;
+    case "not":
+      return whenReferences(node.node, name);
+    case "and":
+    case "or":
+      return whenReferences(node.left, name) || whenReferences(node.right, name);
+  }
+}
+
+const isToolOpenCommand = Schema.is(TOOL_OPEN_COMMAND_PATTERN);
+
+function matchesBindingContext(
+  binding: ResolvedKeybindingRule,
+  context: ShortcutMatchContext,
+): boolean {
+  // A focused TUI owns every key (Esc, Ctrl+B, ...): only rules written for it, or that open
+  // another tool, still apply.
+  if (
+    context.toolFocus &&
+    !isToolOpenCommand(binding.command) &&
+    !(binding.whenAst && whenReferences(binding.whenAst, "toolFocus"))
+  ) {
+    return false;
+  }
+  return matchesWhenClause(binding.whenAst, context);
+}
+
 export function shortcutConflictKey(
   shortcut: KeybindingShortcut,
   platform = navigator.platform,
@@ -117,7 +153,7 @@ export function effectiveShortcutsForCommand(
   for (let index = keybindings.length - 1; index >= 0; index -= 1) {
     const binding = keybindings[index];
     if (!binding) continue;
-    if (!matchesWhenClause(binding.whenAst, context)) continue;
+    if (!matchesBindingContext(binding, context)) continue;
 
     const conflictKey = shortcutConflictKey(binding.shortcut, platform);
     if (claimedShortcuts.has(conflictKey)) {
@@ -157,11 +193,13 @@ export function resolveShortcutCommand(
 ): KeybindingCommand | null {
   const platform = resolvePlatform(options);
   const context = resolveContext(options);
+  // Read at key time so every app-wide handler, capture phase included, yields to a focused tool.
+  context.toolFocus ??= getTerminalFocusOwner() === "tool";
 
   for (let index = keybindings.length - 1; index >= 0; index -= 1) {
     const binding = keybindings[index];
     if (!binding) continue;
-    if (!matchesWhenClause(binding.whenAst, context)) continue;
+    if (!matchesBindingContext(binding, context)) continue;
     if (!matchesKeybindingShortcut(event, binding.shortcut, platform)) continue;
     return binding.command;
   }

@@ -1,4 +1,4 @@
-import { type TerminalSummary, WS_METHODS } from "@t3tools/contracts";
+import { isEnvironmentToolThreadId, type TerminalSummary, WS_METHODS } from "@t3tools/contracts";
 import * as Stream from "effect/Stream";
 import { Atom } from "effect/reactivity";
 
@@ -36,25 +36,43 @@ export function createTerminalEnvironmentAtoms<R, E>(
     readonly input: { readonly threadId: string; readonly terminalId?: string | undefined };
   }) => JSON.stringify([environmentId, input.threadId, input.terminalId ?? null]);
   const lifecycleConcurrency = { mode: "serial" as const, key: terminalThreadKey };
+  const observeSession = (input: EnvironmentRpcInput<typeof WS_METHODS.terminalObserve>) =>
+    Stream.suspend(() =>
+      subscribe(WS_METHODS.terminalObserve, input).pipe(
+        Stream.scan(nextTerminalAttachSeedState, applyTerminalAttachStreamEvent),
+      ),
+    );
+  const attachSession = (input: EnvironmentRpcInput<typeof WS_METHODS.terminalAttach>) =>
+    Stream.suspend(() =>
+      subscribe(WS_METHODS.terminalAttach, input).pipe(
+        Stream.scan(nextTerminalAttachSeedState, applyTerminalAttachStreamEvent),
+      ),
+    );
+  const observe = createEnvironmentSubscriptionAtomFamily(runtime, {
+    label: "environment-data:terminal:observe",
+    subscribe: observeSession,
+  });
+  const attach = createEnvironmentSubscriptionAtomFamily(runtime, {
+    label: "environment-data:terminal:attach",
+    subscribe: attachSession,
+  });
+  // A trimmed client buffer can start mid-screen and lose a TUI's mode setup, so tool views
+  // attach fresh on every mount and get the server's mode-prefixed snapshot and redraw.
+  const observeTool = createEnvironmentSubscriptionAtomFamily(runtime, {
+    label: "environment-data:terminal:observe-tool",
+    idleTtlMs: 0,
+    subscribe: observeSession,
+  });
+  const attachTool = createEnvironmentSubscriptionAtomFamily(runtime, {
+    label: "environment-data:terminal:attach-tool",
+    idleTtlMs: 0,
+    subscribe: attachSession,
+  });
   return {
-    observe: createEnvironmentSubscriptionAtomFamily(runtime, {
-      label: "environment-data:terminal:observe",
-      subscribe: (input: EnvironmentRpcInput<typeof WS_METHODS.terminalObserve>) =>
-        Stream.suspend(() =>
-          subscribe(WS_METHODS.terminalObserve, input).pipe(
-            Stream.scan(nextTerminalAttachSeedState, applyTerminalAttachStreamEvent),
-          ),
-        ),
-    }),
-    attach: createEnvironmentSubscriptionAtomFamily(runtime, {
-      label: "environment-data:terminal:attach",
-      subscribe: (input: EnvironmentRpcInput<typeof WS_METHODS.terminalAttach>) =>
-        Stream.suspend(() =>
-          subscribe(WS_METHODS.terminalAttach, input).pipe(
-            Stream.scan(nextTerminalAttachSeedState, applyTerminalAttachStreamEvent),
-          ),
-        ),
-    }),
+    observe: (target: Parameters<typeof observe>[0]) =>
+      isEnvironmentToolThreadId(target.input.threadId) ? observeTool(target) : observe(target),
+    attach: (target: Parameters<typeof attach>[0]) =>
+      isEnvironmentToolThreadId(target.input.threadId) ? attachTool(target) : attach(target),
     events: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:terminal:events",
       tag: WS_METHODS.subscribeTerminalEvents,

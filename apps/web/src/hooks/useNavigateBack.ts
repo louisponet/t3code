@@ -1,7 +1,7 @@
 import { useCanGoBack, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect } from "react";
 
-function useNavigateBack() {
+export function useNavigateBack() {
   const navigate = useNavigate();
   const canGoBack = useCanGoBack();
 

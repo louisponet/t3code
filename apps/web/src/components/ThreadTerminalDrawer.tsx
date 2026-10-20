@@ -377,7 +377,8 @@ interface TerminalViewportProps {
   threadId: ThreadId;
   terminalId: string;
   terminalLabel: string;
-  cwd: string;
+  /** Omitted to only attach to a running session, never launch one. */
+  cwd?: string;
   worktreePath?: string | null;
   runtimeEnv?: Record<string, string>;
   providerInstanceId?: ProviderInstanceId;
@@ -389,6 +390,10 @@ interface TerminalViewportProps {
   resizeEpoch: number;
   drawerHeight: number;
   keybindings: ResolvedKeybindingsConfig;
+  /** Replaces the drawer's shortcuts; returning false leaves the key to the app. */
+  beforeKey?: (event: KeyboardEvent) => boolean;
+  /** Replaces opening web links in the thread's browser panel. */
+  onOpenLink?: (url: string) => void;
 }
 
 interface TerminalLaunchLocation {
@@ -415,6 +420,8 @@ export function TerminalViewport({
   resizeEpoch,
   drawerHeight,
   keybindings,
+  beforeKey,
+  onOpenLink,
 }: TerminalViewportProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<GhosttyTerminalSurface | null>(null);
@@ -449,6 +456,8 @@ export function TerminalViewport({
   const openSelectionMenuRequestIdRef = useRef<number | null>(null);
   const keybindingsRef = useRef(keybindings);
   const runtimeEnvKey = useMemo(() => runtimeEnvSignature(runtimeEnv), [runtimeEnv]);
+  const readBeforeKey = useEffectEvent(() => beforeKey);
+  const readOpenLink = useEffectEvent(() => onOpenLink);
   const handleSessionExited = useEffectEvent(() => {
     if (hasTerminalWriteAccess()) onSessionExited();
   });
@@ -477,7 +486,7 @@ export function TerminalViewport({
     terminal: {
       threadId,
       terminalId,
-      ...(!isHelixReviewTerminal(terminalId) ? { cwd } : {}),
+      ...(cwd !== undefined && !isHelixReviewTerminal(terminalId) ? { cwd } : {}),
       ...(worktreePath !== undefined ? { worktreePath } : {}),
       ...(runtimeEnv ? { env: runtimeEnv } : {}),
       ...(providerInstanceId ? { providerInstanceId } : {}),
@@ -541,6 +550,8 @@ export function TerminalViewport({
   useEffect(() => {
     keybindingsRef.current = keybindings;
   }, [keybindings]);
+  const terminalCwd = cwd ?? terminalSession.summary?.cwd ?? null;
+  const readTerminalCwd = useEffectEvent(() => terminalCwd);
 
   useLayoutEffect(() => {
     if (terminalRef.current) terminalRef.current.input.readOnly = !canOperateTerminal;
@@ -843,6 +854,8 @@ export function TerminalViewport({
       };
 
       function handleBeforeKey(event: KeyboardEvent): boolean {
+        const override = readBeforeKey();
+        if (override) return override(event);
         const currentKeybindings = keybindingsRef.current;
         const options = { context: { terminalFocus: true, terminalOpen: true } };
         if (preventTerminalCloseShortcut(event, currentKeybindings)) {
@@ -886,6 +899,11 @@ export function TerminalViewport({
         const latestTerminal = terminalRef.current;
         if (!latestTerminal) return;
         if (isTerminalUrl(text)) {
+          const openLink = readOpenLink();
+          if (openLink) {
+            openLink(text);
+            return;
+          }
           if (!localApi) {
             writeSystemMessage(latestTerminal, "Opening links is unavailable in this browser.");
             return;
@@ -919,7 +937,9 @@ export function TerminalViewport({
           });
           return;
         }
-        const target = resolvePathLinkTarget(text, cwd);
+        const linkCwd = readTerminalCwd();
+        if (linkCwd === null) return;
+        const target = resolvePathLinkTarget(text, linkCwd);
         void (async () => {
           const result = await openTerminalPath(target);
           if (result._tag === "Success" || isAtomCommandInterrupted(result)) {
@@ -967,6 +987,11 @@ export function TerminalViewport({
         onDismiss: (reason) => dismissSelectionAction(reason === "interaction"),
       });
       setupCleanups.push(() => selectionActions?.dispose());
+
+      // The PTY has one size and the last resize wins, so the device being typed on claims it.
+      const reassertSize = () => terminalRef.current?.resendSize();
+      terminal.input.addEventListener("focus", reassertSize);
+      setupCleanups.push(() => terminal.input.removeEventListener("focus", reassertSize));
 
       const themeObserver = new MutationObserver(() => {
         const activeTerminal = terminalRef.current;

@@ -143,6 +143,8 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+-", command: "preview.zoomOut", when: "previewFocus" },
   { key: "mod+0", command: "preview.resetZoom", when: "previewFocus" },
   { key: "mod+k", command: "commandPalette.toggle", when: "!terminalFocus" },
+  // A focused tool TUI owns every other key; Ctrl+Shift+letter is the usual terminal-emulator range.
+  { key: "mod+shift+k", command: "commandPalette.toggle", when: "toolFocus" },
   { key: "mod+p", command: "filePicker.toggle", when: "!terminalFocus" },
   { key: "mod+shift+f", command: "projectSearch.toggle", when: "!terminalFocus" },
   { key: "mod+u", command: "usage.open", when: "!terminalFocus" },

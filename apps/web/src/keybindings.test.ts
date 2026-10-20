@@ -297,6 +297,81 @@ describe("thread undo shortcut", () => {
   });
 });
 
+describe("tool focus", () => {
+  const toolFocus = { platform: "Linux", context: { terminalFocus: true, toolFocus: true } };
+
+  it("leaves app chords, including unconditional ones, to the TUI", () => {
+    for (const key of ["b", "d", "n", "w", "j", "k"]) {
+      assert.isNull(
+        resolveShortcutCommand(
+          event({ key, ctrlKey: true }),
+          DEFAULT_RESOLVED_KEYBINDINGS,
+          toolFocus,
+        ),
+        key,
+      );
+    }
+    assert.isNull(
+      resolveShortcutCommand(event({ key: "Escape" }), DEFAULT_RESOLVED_KEYBINDINGS, toolFocus),
+    );
+  });
+
+  it("keeps the escape hatch to the command palette", () => {
+    const paletteKey = event({ key: "k", ctrlKey: true, shiftKey: true });
+    assert.strictEqual(
+      resolveShortcutCommand(paletteKey, DEFAULT_RESOLVED_KEYBINDINGS, toolFocus),
+      "commandPalette.toggle",
+    );
+    assert.strictEqual(
+      resolveShortcutCommand(paletteKey, DEFAULT_RESOLVED_KEYBINDINGS, {
+        platform: "Linux",
+        context: { terminalFocus: false },
+      }),
+      "pullRequest.copyNumber",
+    );
+    assert.deepEqual(
+      effectiveShortcutsForCommand(
+        DEFAULT_RESOLVED_KEYBINDINGS,
+        "commandPalette.toggle",
+        toolFocus,
+      ),
+      [modShortcut("k", { shiftKey: true })],
+    );
+  });
+
+  it("matches rules that reference toolFocus and tool open commands", () => {
+    const keybindings = compile([
+      { shortcut: modShortcut("g", { shiftKey: true }), command: "tool.lazygit.open" },
+      {
+        shortcut: modShortcut("b", { altKey: true }),
+        command: "sidebar.toggle",
+        whenAst: whenAnd(whenIdentifier("toolFocus"), whenNot(whenIdentifier("previewFocus"))),
+      },
+    ]);
+    assert.strictEqual(
+      resolveShortcutCommand(event({ key: "g", ctrlKey: true, shiftKey: true }), keybindings, {
+        ...toolFocus,
+      }),
+      "tool.lazygit.open",
+    );
+    assert.strictEqual(
+      resolveShortcutCommand(event({ key: "b", ctrlKey: true, altKey: true }), keybindings, {
+        ...toolFocus,
+      }),
+      "sidebar.toggle",
+    );
+  });
+
+  it("is off without a focused tool, even without a document", () => {
+    assert.strictEqual(
+      resolveShortcutCommand(event({ key: "b", ctrlKey: true }), DEFAULT_RESOLVED_KEYBINDINGS, {
+        platform: "Linux",
+      }),
+      "sidebar.toggle",
+    );
+  });
+});
+
 describe("copy thread reference shortcut", () => {
   it("resolves Cmd+Shift+C on macOS and Ctrl+Shift+C elsewhere", () => {
     assert.equal(

@@ -102,6 +102,8 @@ interface Props {
     annotation: PreviewAnnotationPayload,
     image: ComposerImageAttachment | null,
   ) => void;
+  /** False for tabs that must stay in the environment's browser, such as a tool's. */
+  allowRuntimeMove?: boolean;
 }
 
 function previewProfileName(
@@ -143,6 +145,7 @@ export function PreviewView({
   configuredUrls,
   visible,
   onSendAnnotation,
+  allowRuntimeMove = true,
 }: Props) {
   const [focusUrlNonce, setFocusUrlNonce] = useState<number | undefined>(undefined);
   const [pickActive, setPickActive] = useState(false);
@@ -425,12 +428,14 @@ export function PreviewView({
     void localApi.shell.openExternal(url).catch(() => undefined);
   }, [url]);
 
-  const moveTarget = alternatePreviewRuntime(
-    threadRef.environmentId,
-    primaryEnvironmentId,
-    serverBrowser,
-    snapshot,
-  );
+  const moveTarget = allowRuntimeMove
+    ? alternatePreviewRuntime(
+        threadRef.environmentId,
+        primaryEnvironmentId,
+        serverBrowser,
+        snapshot,
+      )
+    : null;
   const moveLabel =
     moveTarget === "server" ? `Open in ${environmentLabel}'s browser` : "Open on this computer";
   const handleMoveTab = useCallback(async () => {

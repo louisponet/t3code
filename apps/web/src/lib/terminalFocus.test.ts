@@ -78,4 +78,23 @@ describe("isTerminalFocused", () => {
     expect(getTerminalFocusOwner()).toBe("right-panel");
     expect(isTerminalFocused()).toBe(true);
   });
+
+  it("returns the tool owner, which still counts as terminal focus", () => {
+    const toolInput = new MockHTMLElement();
+    toolInput.isConnected = true;
+    toolInput.terminalOwner = "tool";
+    toolInput.dataset.terminalOwner = "tool";
+
+    globalThis.HTMLElement = MockHTMLElement as unknown as typeof HTMLElement;
+    globalThis.document = { activeElement: toolInput } as unknown as Document;
+
+    expect(getTerminalFocusOwner()).toBe("tool");
+    expect(isTerminalFocused()).toBe(true);
+  });
+
+  it("has no owner without a document", () => {
+    delete (globalThis as { document?: Document }).document;
+
+    expect(getTerminalFocusOwner()).toBeNull();
+  });
 });

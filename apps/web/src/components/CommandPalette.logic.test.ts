@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  EnvironmentToolId,
+  ProjectId,
+  ProviderInstanceId,
+  ThreadId,
+} from "@t3tools/contracts";
+import type { EnvironmentToolRow } from "../state/environmentTools.logic";
 import type { Project, Thread } from "../types";
 import { makeThreadFixture } from "../test-fixtures";
 import {
@@ -8,12 +15,15 @@ import {
   buildCommandPaletteRows,
   buildProjectActionItems,
   buildThreadActionItems,
+  buildToolActionItems,
   buildLinkedThreadActionItems,
   enumerateCommandPaletteItems,
   filterPinnedBrowseEntries,
   filterCommandPaletteGroups,
   findHighlightedCommandPaletteItem,
   reduceCommandPaletteUiState,
+  resolveToolOpenShortcut,
+  toolIdFromOpenCommand,
   type CommandPaletteActionItem,
   type CommandPaletteGroup,
 } from "./CommandPalette.logic";
@@ -892,5 +902,49 @@ describe("virtualized command palette rows", () => {
     expect(findHighlightedCommandPaletteItem(groups, "thread-b")?.value).toBe("thread-b");
     expect(findHighlightedCommandPaletteItem(groups, "offline")).toBeNull();
     expect(findHighlightedCommandPaletteItem(groups, null)).toBeNull();
+  });
+});
+
+describe("tool palette items and shortcuts", () => {
+  const laptop = EnvironmentId.make("laptop");
+  const server = EnvironmentId.make("server");
+  const tool = (environmentId: EnvironmentId, id: string, name: string): EnvironmentToolRow => ({
+    environmentId,
+    toolId: EnvironmentToolId.make(id),
+    definition: { kind: "terminal", name, command: id },
+    offline: false,
+  });
+  const rows = [
+    tool(server, "lazygit", "Lazygit"),
+    tool(server, "btop", "btop"),
+    tool(laptop, "lazygit", "lazygit"),
+  ];
+
+  it("names the environment only for tools whose name another environment also uses", () => {
+    const items = buildToolActionItems({
+      rows,
+      labelById: new Map([
+        [laptop, "Laptop"],
+        [server, "Build server"],
+      ]),
+      terminalIcon: null,
+      browserIcon: null,
+      renderDescription: (_row, environmentLabel) => environmentLabel,
+      runTool: async () => {},
+    });
+    expect(items.map((item) => [item.value, item.description, item.shortcutCommand])).toEqual([
+      ["tool:server:lazygit", "Build server", "tool.lazygit.open"],
+      ["tool:server:btop", null, "tool.btop.open"],
+      ["tool:laptop:lazygit", "Laptop", "tool.lazygit.open"],
+    ]);
+  });
+
+  it("opens a unique tool, defers an ambiguous id to the user, and reports a missing one", () => {
+    expect(toolIdFromOpenCommand("tool.btop.open")).toBe("btop");
+    expect(toolIdFromOpenCommand("script.btop.run")).toBeNull();
+    expect(toolIdFromOpenCommand(null)).toBeNull();
+    expect(resolveToolOpenShortcut(rows, "btop")).toEqual({ kind: "unique", row: rows[1] });
+    expect(resolveToolOpenShortcut(rows, "lazygit")).toEqual({ kind: "ambiguous" });
+    expect(resolveToolOpenShortcut(rows, "k9s")).toEqual({ kind: "missing" });
   });
 });

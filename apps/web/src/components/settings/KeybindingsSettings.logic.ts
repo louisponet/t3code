@@ -214,6 +214,7 @@ const KEYBINDING_GROUPS = [
   { id: "preview", title: "Preview & diff", prefixes: ["preview", "diff"] },
   { id: "appearance", title: "Appearance", prefixes: ["theme", "appearance", "themeEditor"] },
   { id: "scripts", title: "Project scripts", prefixes: ["script"] },
+  { id: "tools", title: "Tools", prefixes: ["tool"] },
 ] as const;
 const OTHER_KEYBINDING_GROUP = { id: "other", title: "Other" } as const;
 
@@ -367,6 +368,9 @@ export function commandLabel(command: KeybindingCommand): string {
   const raw = String(command);
   if (raw.startsWith("script.") && raw.endsWith(".run")) {
     return `Run Script: ${titleCaseCommandSegment(raw.slice("script.".length, -".run".length))}`;
+  }
+  if (raw.startsWith("tool.") && raw.endsWith(".open")) {
+    return `Open Tool: ${titleCaseCommandSegment(raw.slice("tool.".length, -".open".length))}`;
   }
   return raw.split(".").map(titleCaseCommandSegment).join(": ");
 }

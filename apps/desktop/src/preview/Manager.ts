@@ -2092,7 +2092,10 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   const fillFromOnePassword = Effect.fn("PreviewManager.fillFromOnePassword")(function* (
     tabId: string,
   ) {
-    return yield* onePassword.fill(yield* requireWebContents(tabId));
+    const wc = yield* requireWebContents(tabId);
+    // Agents drive a server tab through the CDP relay and could read what was filled.
+    if ((yield* SynchronizedRef.get(tabsRef)).get(tabId)?.serverTab) return "cancelled" as const;
+    return yield* onePassword.fill(wc);
   });
 
   const setAnnotationTheme = Effect.fn("PreviewManager.setAnnotationTheme")(function* (

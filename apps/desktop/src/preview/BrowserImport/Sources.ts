@@ -22,7 +22,6 @@ export interface BrowserImportPathContext {
 
 export interface BrowserImportSourceDefinition {
   readonly id: BrowserImportSourceId;
-  readonly name: string;
   readonly engine: BrowserImportEngine;
   readonly platforms: ReadonlyArray<NodeJS.Platform>;
   readonly userDataDirectory: (context: BrowserImportPathContext) => string | undefined;
@@ -38,7 +37,6 @@ const macApplicationSupport = (
 
 const chromiumSource = (input: {
   readonly id: BrowserImportSourceId;
-  readonly name: string;
   readonly keychainService: string;
   readonly keychainAccount: string;
   readonly macSegments: ReadonlyArray<string>;
@@ -47,7 +45,6 @@ const chromiumSource = (input: {
   readonly windowsSegments?: ReadonlyArray<string>;
 }): BrowserImportSourceDefinition => ({
   id: input.id,
-  name: input.name,
   engine: "chromium",
   platforms: [
     "darwin" as NodeJS.Platform,
@@ -78,7 +75,6 @@ export const BROWSER_IMPORT_SOURCES: ReadonlyArray<BrowserImportSourceDefinition
   // other process can read them.
   chromiumSource({
     id: "chrome",
-    name: "Chrome",
     keychainService: "Chrome Safe Storage",
     keychainAccount: "Chrome",
     macSegments: ["Google", "Chrome"],
@@ -87,7 +83,6 @@ export const BROWSER_IMPORT_SOURCES: ReadonlyArray<BrowserImportSourceDefinition
   }),
   chromiumSource({
     id: "edge",
-    name: "Microsoft Edge",
     keychainService: "Microsoft Edge Safe Storage",
     keychainAccount: "Microsoft Edge",
     macSegments: ["Microsoft Edge"],
@@ -96,7 +91,6 @@ export const BROWSER_IMPORT_SOURCES: ReadonlyArray<BrowserImportSourceDefinition
   }),
   chromiumSource({
     id: "brave",
-    name: "Brave",
     keychainService: "Brave Safe Storage",
     keychainAccount: "Brave",
     macSegments: ["BraveSoftware", "Brave-Browser"],
@@ -105,7 +99,6 @@ export const BROWSER_IMPORT_SOURCES: ReadonlyArray<BrowserImportSourceDefinition
   }),
   chromiumSource({
     id: "vivaldi",
-    name: "Vivaldi",
     keychainService: "Vivaldi Safe Storage",
     keychainAccount: "Vivaldi",
     macSegments: ["Vivaldi"],
@@ -114,7 +107,6 @@ export const BROWSER_IMPORT_SOURCES: ReadonlyArray<BrowserImportSourceDefinition
   }),
   chromiumSource({
     id: "opera",
-    name: "Opera",
     keychainService: "Opera Safe Storage",
     keychainAccount: "Opera",
     macSegments: ["com.operasoftware.Opera"],
@@ -123,14 +115,12 @@ export const BROWSER_IMPORT_SOURCES: ReadonlyArray<BrowserImportSourceDefinition
   }),
   chromiumSource({
     id: "arc",
-    name: "Arc",
     keychainService: "Arc Safe Storage",
     keychainAccount: "Arc",
     macSegments: ["Arc", "User Data"],
   }),
   chromiumSource({
     id: "helium",
-    name: "Helium",
     keychainService: "Helium Storage Key",
     keychainAccount: "Helium",
     macSegments: ["net.imput.helium"],
@@ -141,7 +131,6 @@ export const BROWSER_IMPORT_SOURCES: ReadonlyArray<BrowserImportSourceDefinition
   }),
   {
     id: "safari",
-    name: "Safari",
     engine: "safari",
     platforms: ["darwin"],
     userDataDirectory: (context) =>
@@ -159,7 +148,6 @@ export const BROWSER_IMPORT_SOURCES: ReadonlyArray<BrowserImportSourceDefinition
   },
   {
     id: "firefox",
-    name: "Firefox",
     engine: "firefox",
     platforms: ["darwin", "win32", "linux"],
     userDataDirectory: (context) => {
@@ -728,6 +716,21 @@ const firefoxProfileIsHeld = Effect.fnUntraced(function* (
   return yield* posixLockIsHeld(parentLock);
 });
 
+/**
+ * Whether the source has to be closed before its cookies can be read.
+ *
+ * Chromium on macOS and Linux takes no lasting lock on its cookie jar and
+ * flushes writes to it about every 30 seconds, so a snapshot from a read-only
+ * connection is consistent while it runs. Safari keeps no lock and writes its
+ * jar atomically. Chromium on Windows opens the jar without sharing, and
+ * reading a running Firefox is unverified, so those still wait for a quit.
+ */
+export const sourceMustQuitToRead = (
+  definition: BrowserImportSourceDefinition,
+  platform: NodeJS.Platform,
+): boolean =>
+  definition.engine === "firefox" || (definition.engine === "chromium" && platform === "win32");
+
 export const isSourceRunning = Effect.fn("BrowserImportSources.isSourceRunning")(function* (
   definition: BrowserImportSourceDefinition,
   context: BrowserImportPathContext,
@@ -739,8 +742,7 @@ export const isSourceRunning = Effect.fn("BrowserImportSources.isSourceRunning")
   const fileSystem = yield* FileSystem.FileSystem;
   const root = definition.userDataDirectory(context);
   if (root === undefined) return false;
-  // Safari keeps no lock and writes its jar atomically, so a running instance
-  // is not a hazard there.
+  // Safari leaves no lock to probe.
   if (definition.engine === "safari") return false;
   if (definition.engine !== "firefox") {
     if (context.platform === "win32") {

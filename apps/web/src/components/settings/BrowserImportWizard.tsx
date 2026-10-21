@@ -18,7 +18,9 @@ import {
   DialogPopup,
   DialogTitle,
 } from "../ui/dialog";
+import { Label } from "../ui/label";
 import { Spinner } from "../ui/spinner";
+import { Switch } from "../ui/switch";
 import {
   initialWizardStep,
   initialTargetSelection,
@@ -46,6 +48,7 @@ interface BrowserImportWizardProps {
   readonly onImport: (input: {
     readonly sourceProfileDirectory: string;
     readonly target: WizardTarget;
+    readonly keepInSync: boolean;
   }) => Promise<ImportOutcome>;
   readonly onRefreshSource: () => Promise<BrowserImportSource | undefined>;
   readonly onOpenFullDiskAccessSettings: () => void | Promise<void>;
@@ -72,6 +75,7 @@ export function BrowserImportWizard({
     initialTargetSelection(canCreateProfile, targetProfiles),
   );
   const [targetError, setTargetError] = useState<string>();
+  const [keepInSync, setKeepInSync] = useState(true);
   const newProfileId = useRef(`profile-${randomUUID()}`);
   // A second Import click before React has left the configure screen would
   // start a second run; the parent refuses it, and applying that refusal here
@@ -90,7 +94,7 @@ export function BrowserImportWizard({
     setTargetError(undefined);
     importInFlight.current = true;
     setStep({ step: "importing" });
-    void onImport({ sourceProfileDirectory, target: chosen })
+    void onImport({ sourceProfileDirectory, target: chosen, keepInSync })
       .then((outcome) => setStep(outcomeToStep(outcome)))
       .catch(() => setStep({ step: "blocked", reason: "readFailed" }))
       .finally(() => {
@@ -164,6 +168,8 @@ export function BrowserImportWizard({
               setTargetError(undefined);
             }}
             targetError={targetError}
+            keepInSync={keepInSync}
+            onKeepInSyncChange={setKeepInSync}
             onCancel={onClose}
             onImport={runImport}
           />
@@ -219,6 +225,8 @@ type ConfigureStepProps = {
   readonly target: WizardTargetSelection;
   readonly targetError: string | undefined;
   readonly onTargetChange: (target: WizardTargetSelection) => void;
+  readonly keepInSync: boolean;
+  readonly onKeepInSyncChange: (keepInSync: boolean) => void;
   readonly onCancel: () => void;
   readonly onImport: () => void;
 };
@@ -258,8 +266,7 @@ function FullDiskAccessStep({
         <DialogTitle>Let T3 Code read {source.name}&rsquo;s cookies</DialogTitle>
         <DialogDescription>
           To import cookies from {source.name}, T3 Code needs Full Disk Access. Turn it on in System
-          Settings, then come back to finish the import — you can revoke it again once the import is
-          done.
+          Settings, then come back to finish the import.
         </DialogDescription>
       </DialogHeader>
       <DialogPanel>
@@ -318,6 +325,8 @@ function ConfigureStep({
   target,
   targetError,
   onTargetChange,
+  keepInSync,
+  onKeepInSyncChange,
   onCancel,
   onImport,
 }: ConfigureStepProps) {
@@ -380,6 +389,19 @@ function ConfigureStep({
               />
             ))}
           </section>
+        </div>
+        <div className="mt-4 flex items-center justify-between gap-4">
+          <div className="min-w-0 space-y-1">
+            <Label htmlFor="browser-import-keep-in-sync">Keep in sync</Label>
+            <p className="text-xs text-muted-foreground">
+              Imports from {source.name} again every 15 minutes while T3 Code is open.
+            </p>
+          </div>
+          <Switch
+            id="browser-import-keep-in-sync"
+            checked={keepInSync}
+            onCheckedChange={(checked) => onKeepInSyncChange(Boolean(checked))}
+          />
         </div>
         {targetFeedback ? (
           <p role="alert" className="mt-3 text-sm text-destructive">

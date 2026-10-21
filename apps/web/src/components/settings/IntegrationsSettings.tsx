@@ -6,7 +6,9 @@ import { DeviceHostsSettings } from "./DeviceHostsSettings";
 import {
   AuthSettingsWriteScope,
   BrowserImportFailureReason,
+  BROWSER_IMPORT_SOURCE_NAMES,
   BROWSER_PROFILE_MAX_COUNT,
+  type BrowserCookieSyncLink,
   type BrowserLinkTarget,
   type BrowserProfile,
   type EnvironmentId,
@@ -113,7 +115,7 @@ import { searchableSetting } from "./settingsSearch";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { BrowserImportWizard, type WizardTarget } from "./BrowserImportWizard";
-import type { ImportOutcome } from "./browserImportWizard.logic";
+import { withCookieSync, withoutCookieSync, type ImportOutcome } from "./browserImportWizard.logic";
 
 const FILL_VALUE = "fill";
 const RESPONSIVE_VALUE = "responsive";
@@ -933,6 +935,7 @@ function BrowserAutoShowFloatingPreviewSetting({ disabled }: { readonly disabled
 function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
   const userProfiles = useClientSettings((settings) => settings.browserProfiles);
   const defaultProfileId = useClientSettings((settings) => settings.browserDefaultProfileId);
+  const cookieSyncs = useClientSettings((settings) => settings.browserCookieSyncs);
   const settingsHydrated = useClientSettingsHydrated();
   const updateSettings = useUpdatePrimarySettings();
   const { environments, isReady: environmentsReady } = useEnvironments();
@@ -1000,6 +1003,13 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
     });
   };
 
+  const stopSyncing = (id: string) => {
+    if (!settingsHydrated || importInFlightRef.current) return;
+    updateSettings({
+      browserCookieSyncs: withoutCookieSync(getClientSettings().browserCookieSyncs, id),
+    });
+  };
+
   const clearProfileData = (id: string, name: string) => {
     if (!settingsHydrated || importInFlightRef.current) return;
     if (!removalAvailable) {
@@ -1047,6 +1057,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
     const currentSettings = getClientSettings();
     updateSettings({
       browserProfiles: currentSettings.browserProfiles.filter((profile) => profile.id !== id),
+      browserCookieSyncs: withoutCookieSync(currentSettings.browserCookieSyncs, id),
       ...(currentSettings.browserDefaultProfileId === id
         ? { browserDefaultProfileId: DEFAULT_BROWSER_PROFILE_ID }
         : {}),
@@ -1070,7 +1081,11 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
 
   const runWizardImport = async (
     source: BrowserImportSource,
-    input: { readonly sourceProfileDirectory: string; readonly target: WizardTarget },
+    input: {
+      readonly sourceProfileDirectory: string;
+      readonly target: WizardTarget;
+      readonly keepInSync: boolean;
+    },
   ): Promise<ImportOutcome> => {
     // Profiles are per device but their cookies live per environment, so the
     // import goes everywhere a tab in this profile can open, as clearing does.
@@ -1088,6 +1103,15 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
       return { kind: "blocked", reason: "readFailed" };
     }
     if (importInFlightRef.current) return { kind: "blocked", reason: "readFailed" };
+    const syncLinks = (links: ReadonlyArray<BrowserCookieSyncLink>) =>
+      input.keepInSync
+        ? withCookieSync(links, {
+            profileId: input.target.profileId,
+            sourceId: source.id,
+            sourceProfileDirectory: input.sourceProfileDirectory,
+            environmentIds,
+          })
+        : withoutCookieSync(links, input.target.profileId);
     importInFlightRef.current = true;
     setImportInFlight(true);
     let newProfileSaved = false;
@@ -1114,7 +1138,9 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
               const existing = current.browserProfiles.find(
                 (profile) => profile.id === input.target.profileId,
               );
-              if (existing) return current;
+              if (existing) {
+                return { ...current, browserCookieSyncs: syncLinks(current.browserCookieSyncs) };
+              }
               // The wizard refuses a new target at the cap, but the cap can be
               // reached while the import runs; the updater sees the newest
               // settings, so this is the check that holds.
@@ -1132,6 +1158,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                   ...current.browserProfiles,
                   { id: input.target.profileId, name, kind: "persistent" as const },
                 ],
+                browserCookieSyncs: syncLinks(current.browserCookieSyncs),
               };
             });
             newProfileSaved = true;
@@ -1148,6 +1175,16 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
         }
       } else {
         targetName = input.target.name;
+        try {
+          await persistClientSettingsUpdate((current) => ({
+            ...current,
+            browserCookieSyncs: syncLinks(current.browserCookieSyncs),
+          }));
+        } catch (cause) {
+          throw new Error(`Importing cookies from ${source.id} failed: profileNotSaved.`, {
+            cause,
+          });
+        }
       }
       return {
         kind: "imported",
@@ -1250,6 +1287,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
         {listedProfiles.map((profile, index) => {
           const builtIn = isBuiltInBrowserProfileId(profile.id);
           const isDefault = profile.id === resolvedDefaultId;
+          const cookieSync = cookieSyncs.find((link) => link.profileId === profile.id);
           return (
             <div
               key={profile.id}
@@ -1283,6 +1321,16 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                 {isDefault ? (
                   <span className={cn("flex", profileWritesDisabled && "opacity-64")}>
                     <Badge>Default</Badge>
+                  </span>
+                ) : null}
+                {cookieSync ? (
+                  <span
+                    className={cn(
+                      "shrink-0 text-xs text-muted-foreground",
+                      profileWritesDisabled && "opacity-64",
+                    )}
+                  >
+                    Synced from {BROWSER_IMPORT_SOURCE_NAMES[cookieSync.sourceId]}
                   </span>
                 ) : null}
               </span>
@@ -1320,6 +1368,11 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                   >
                     Clear cookies and cache
                   </MenuItem>
+                  {cookieSync ? (
+                    <MenuItem disabled={!settingsHydrated} onClick={() => stopSyncing(profile.id)}>
+                      Stop syncing
+                    </MenuItem>
+                  ) : null}
                   {builtIn ? null : (
                     <MenuItem
                       variant="destructive"

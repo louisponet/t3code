@@ -1,5 +1,5 @@
 import * as Schema from "effect/Schema";
-import { TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { EnvironmentId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { BrowserProfileId } from "./browserProfile.ts";
 
 const BROWSER_IMPORT_SOURCE_IDS = [
@@ -16,6 +16,18 @@ const BROWSER_IMPORT_SOURCE_IDS = [
 
 export const BrowserImportSourceId = Schema.Literals(BROWSER_IMPORT_SOURCE_IDS);
 export type BrowserImportSourceId = typeof BrowserImportSourceId.Type;
+
+export const BROWSER_IMPORT_SOURCE_NAMES: Readonly<Record<BrowserImportSourceId, string>> = {
+  chrome: "Chrome",
+  edge: "Microsoft Edge",
+  brave: "Brave",
+  vivaldi: "Vivaldi",
+  opera: "Opera",
+  arc: "Arc",
+  helium: "Helium",
+  firefox: "Firefox",
+  safari: "Safari",
+};
 
 export const BrowserImportUnavailableReason = Schema.Literals([
   "notInstalled",
@@ -68,6 +80,18 @@ export const DesktopPreviewImportCookiesInputSchema = Schema.Struct({
   targetProfileId: BrowserProfileId,
 });
 
+/**
+ * A profile that the desktop app imports into again on a schedule. It names the source and the
+ * environments whose partitions receive the cookies, never the cookies themselves.
+ */
+export const BrowserCookieSyncLink = Schema.Struct({
+  profileId: BrowserProfileId,
+  sourceId: BrowserImportSourceId,
+  sourceProfileDirectory: TrimmedNonEmptyString,
+  environmentIds: Schema.NonEmptyArray(EnvironmentId),
+});
+export type BrowserCookieSyncLink = typeof BrowserCookieSyncLink.Type;
+
 export const BrowserImportResult = Schema.Struct({
   imported: Schema.Int,
   skipped: Schema.Int,
@@ -93,7 +117,7 @@ export const BROWSER_IMPORT_FAILURE_COPY: Readonly<Record<BrowserImportFailureRe
   unknownSource: "That browser is no longer available to import from.",
   unknownSourceProfile: "That browser profile no longer exists.",
   sessionUnavailable: "The target profile could not be opened.",
-  profileNotSaved: "The cookies were imported, but the new profile couldn't be saved. Try again.",
+  profileNotSaved: "The cookies were imported, but the profile couldn't be saved. Try again.",
   profileLimitReached:
     "You've reached the profile limit. Delete a profile or import into an existing one.",
   readFailed: "The browser's cookie database could not be read.",

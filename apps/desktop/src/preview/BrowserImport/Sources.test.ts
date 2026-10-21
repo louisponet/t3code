@@ -26,6 +26,7 @@ import {
   isWindowsLockHeldError,
   posixLockIsHeld,
   listSourceProfiles,
+  sourceMustQuitToRead,
   sourcePathContext,
   windowsChromiumCookiesAreHeld,
 } from "./Sources.ts";
@@ -180,6 +181,39 @@ describe("Helium on Windows", () => {
       }),
     ),
   );
+});
+
+describe("sourceMustQuitToRead", () => {
+  it("reads Chromium live on macOS and Linux, and waits for Windows Chromium and Firefox", () => {
+    const mustQuit = (platform: NodeJS.Platform) =>
+      Object.fromEntries(
+        BROWSER_IMPORT_SOURCES.filter((source) => source.platforms.includes(platform)).map(
+          (source) => [source.id, sourceMustQuitToRead(source, platform)],
+        ),
+      );
+
+    assert.deepEqual(mustQuit("darwin"), {
+      chrome: false,
+      edge: false,
+      brave: false,
+      vivaldi: false,
+      opera: false,
+      arc: false,
+      helium: false,
+      safari: false,
+      firefox: true,
+    });
+    assert.deepEqual(mustQuit("linux"), {
+      chrome: false,
+      edge: false,
+      brave: false,
+      vivaldi: false,
+      opera: false,
+      helium: false,
+      firefox: true,
+    });
+    assert.deepEqual(mustQuit("win32"), { helium: true, firefox: true });
+  });
 });
 
 describe("isSourceRunning", () => {

@@ -18,6 +18,7 @@ import * as DesktopClerk from "./DesktopClerk.ts";
 import * as DesktopApplicationMenu from "../window/DesktopApplicationMenu.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
 import * as PreviewPasskeys from "../preview/Passkeys.ts";
+import * as BrowserCookieSync from "../preview/BrowserImport/BrowserCookieSync.ts";
 import * as DesktopBackendPool from "../backend/DesktopBackendPool.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopLegacyLocalStorage from "./DesktopLegacyLocalStorage.ts";
@@ -325,6 +326,7 @@ const startup = Effect.gen(function* () {
   yield* applicationMenu.configure;
   yield* updates.configure;
   yield* DesktopRemoteUpdates.listen;
+  yield* BrowserCookieSync.start;
   yield* linuxUrlHandler.register;
   yield* bootstrap.pipe(Effect.catchCause((cause) => fatalStartupCause("bootstrap", cause)));
 }).pipe(Effect.withSpan("desktop.startup"));

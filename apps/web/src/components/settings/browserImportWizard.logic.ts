@@ -1,4 +1,8 @@
-import type { BrowserImportFailureReason, BrowserImportSource } from "@t3tools/contracts";
+import type {
+  BrowserCookieSyncLink,
+  BrowserImportFailureReason,
+  BrowserImportSource,
+} from "@t3tools/contracts";
 
 export interface WizardTargetProfile {
   readonly id: string;
@@ -136,4 +140,19 @@ export function formatSkippedDomains(domains: ReadonlyArray<string>): string {
   if (domains.length === 1) return domains[0]!;
   if (domains.length <= 3) return `${domains.slice(0, -1).join(", ")} and ${domains.at(-1)}`;
   return `${domains.slice(0, 3).join(", ")} and ${domains.length - 3} more`;
+}
+
+/** A profile syncs from at most one source, so importing into it again replaces its link. */
+export function withCookieSync(
+  links: ReadonlyArray<BrowserCookieSyncLink>,
+  link: BrowserCookieSyncLink,
+): ReadonlyArray<BrowserCookieSyncLink> {
+  return [...withoutCookieSync(links, link.profileId), link];
+}
+
+export function withoutCookieSync(
+  links: ReadonlyArray<BrowserCookieSyncLink>,
+  profileId: string,
+): ReadonlyArray<BrowserCookieSyncLink> {
+  return links.filter((link) => link.profileId !== profileId);
 }

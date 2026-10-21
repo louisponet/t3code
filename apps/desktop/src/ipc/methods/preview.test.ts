@@ -1,9 +1,5 @@
 import { it as effectIt } from "@effect/vitest";
-import {
-  DEFAULT_BROWSER_PROFILE_ID,
-  INCOGNITO_BROWSER_PROFILE_ID,
-  PreviewAutomationStatus,
-} from "@t3tools/contracts";
+import { DEFAULT_BROWSER_PROFILE_ID, PreviewAutomationStatus } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -13,6 +9,7 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import * as PreviewManager from "../../preview/Manager.ts";
 import * as BrowserImport from "../../preview/BrowserImport/BrowserImport.ts";
+import { resolvePartitionScope } from "../../preview/BrowserSession.ts";
 import * as PreviewIpc from "./preview.ts";
 
 const { fromPartition } = vi.hoisted(() => ({
@@ -43,44 +40,6 @@ describe("preview IPC methods", () => {
     expect(fromPartition).not.toHaveBeenCalled();
   });
 
-  it("derives distinct partition scopes when identifiers contain the delimiter", () => {
-    const first = PreviewIpc.resolvePartitionScope("a", "b::c");
-    const second = PreviewIpc.resolvePartitionScope("a::b", "c");
-
-    expect(first).toEqual({ scope: '["a","b::c"]', persistent: true, namespace: "profile" });
-    expect(second).toEqual({ scope: '["a::b","c"]', persistent: true, namespace: "profile" });
-    expect(first.scope).not.toBe(second.scope);
-  });
-
-  it("preserves lone surrogates without collapsing them to replacement characters", () => {
-    const highSurrogate = PreviewIpc.resolvePartitionScope("environment", "profile-\ud800");
-    const lowSurrogate = PreviewIpc.resolvePartitionScope("environment", "profile-\udc00");
-    const replacement = PreviewIpc.resolvePartitionScope("environment", "profile-�");
-
-    expect(highSurrogate.scope).toBe('["environment","profile-\\ud800"]');
-    expect(lowSurrogate.scope).toBe('["environment","profile-\\udc00"]');
-    expect(highSurrogate.scope).not.toBe(lowSurrogate.scope);
-    expect(highSurrogate.scope).not.toBe(replacement.scope);
-    expect(lowSurrogate.scope).not.toBe(replacement.scope);
-  });
-
-  it("keeps the legacy default partition scope and incognito persistence", () => {
-    expect(PreviewIpc.resolvePartitionScope("environment::legacy", undefined)).toEqual({
-      scope: "environment::legacy",
-      persistent: true,
-    });
-    expect(
-      PreviewIpc.resolvePartitionScope("environment::legacy", DEFAULT_BROWSER_PROFILE_ID),
-    ).toEqual({ scope: "environment::legacy", persistent: true });
-    expect(
-      PreviewIpc.resolvePartitionScope("environment::legacy", INCOGNITO_BROWSER_PROFILE_ID),
-    ).toEqual({
-      scope: '["environment::legacy","incognito"]',
-      persistent: false,
-      namespace: "profile",
-    });
-  });
-
   effectIt.effect("targets imports at the same partition tuple as the renderer", () => {
     const received: Array<Parameters<BrowserImport.BrowserImport["Service"]["importCookies"]>[0]> =
       [];
@@ -105,11 +64,11 @@ describe("preview IPC methods", () => {
       yield* request(["a::b"], DEFAULT_BROWSER_PROFILE_ID);
 
       expect(received[0]?.targets).toEqual([
-        PreviewIpc.resolvePartitionScope("a", "b"),
-        PreviewIpc.resolvePartitionScope("c", "b"),
+        resolvePartitionScope("a", "b"),
+        resolvePartitionScope("c", "b"),
       ]);
       expect(received[1]?.targets).toEqual([
-        PreviewIpc.resolvePartitionScope("a::b", DEFAULT_BROWSER_PROFILE_ID),
+        resolvePartitionScope("a::b", DEFAULT_BROWSER_PROFILE_ID),
       ]);
       expect(received[0]?.targets[0].namespace).toBe("profile");
       expect(received[1]?.targets[0].namespace).toBeUndefined();

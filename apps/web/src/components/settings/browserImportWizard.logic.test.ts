@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import type { BrowserImportSource } from "@t3tools/contracts";
+import type { BrowserCookieSyncLink, BrowserImportSource, EnvironmentId } from "@t3tools/contracts";
 
 import {
   canCloseWizard,
@@ -12,6 +12,8 @@ import {
   refreshedSourceProfileDirectory,
   refreshedSourceStep,
   resolveWizardTarget,
+  withCookieSync,
+  withoutCookieSync,
 } from "./browserImportWizard.logic";
 
 describe("wizard target selection", () => {
@@ -218,5 +220,36 @@ describe("formatSkippedDomains", () => {
     expect(formatSkippedDomains(["a.com", "b.com", "c.com", "d.com", "e.com"])).toBe(
       "a.com, b.com, c.com and 2 more",
     );
+  });
+});
+
+const syncLink = (
+  profileId: string,
+  sourceId: BrowserCookieSyncLink["sourceId"],
+): BrowserCookieSyncLink => ({
+  profileId,
+  sourceId,
+  sourceProfileDirectory: "Default",
+  environmentIds: ["environment-a" as EnvironmentId],
+});
+
+describe("cookie sync links", () => {
+  it("keeps one link per profile, replacing the source on a later import", () => {
+    const links = withCookieSync([syncLink("work", "brave"), syncLink("personal", "chrome")], {
+      ...syncLink("work", "helium"),
+      sourceProfileDirectory: "Profile 1",
+    });
+
+    expect(links).toEqual([
+      syncLink("personal", "chrome"),
+      { ...syncLink("work", "helium"), sourceProfileDirectory: "Profile 1" },
+    ]);
+  });
+
+  it("removes only the named profile's link", () => {
+    const links = [syncLink("work", "brave"), syncLink("personal", "chrome")];
+
+    expect(withoutCookieSync(links, "work")).toEqual([syncLink("personal", "chrome")]);
+    expect(withoutCookieSync(links, "missing")).toEqual(links);
   });
 });

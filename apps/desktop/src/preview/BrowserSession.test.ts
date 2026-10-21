@@ -4,7 +4,8 @@ import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as PlatformError from "effect/PlatformError";
-import { beforeEach, vi } from "vite-plus/test";
+import { DEFAULT_BROWSER_PROFILE_ID, INCOGNITO_BROWSER_PROFILE_ID } from "@t3tools/contracts";
+import { beforeEach, expect, vi } from "vite-plus/test";
 
 const { fromPartition, sessions } = vi.hoisted(() => ({
   fromPartition: vi.fn(),
@@ -412,4 +413,44 @@ describe("BrowserSession", () => {
       }
     }).pipe(Effect.provide(layer)),
   );
+});
+
+describe("resolvePartitionScope", () => {
+  it("derives distinct partition scopes when identifiers contain the delimiter", () => {
+    const first = BrowserSession.resolvePartitionScope("a", "b::c");
+    const second = BrowserSession.resolvePartitionScope("a::b", "c");
+
+    expect(first).toEqual({ scope: '["a","b::c"]', persistent: true, namespace: "profile" });
+    expect(second).toEqual({ scope: '["a::b","c"]', persistent: true, namespace: "profile" });
+    expect(first.scope).not.toBe(second.scope);
+  });
+
+  it("preserves lone surrogates without collapsing them to replacement characters", () => {
+    const highSurrogate = BrowserSession.resolvePartitionScope("environment", "profile-\ud800");
+    const lowSurrogate = BrowserSession.resolvePartitionScope("environment", "profile-\udc00");
+    const replacement = BrowserSession.resolvePartitionScope("environment", "profile-�");
+
+    expect(highSurrogate.scope).toBe('["environment","profile-\\ud800"]');
+    expect(lowSurrogate.scope).toBe('["environment","profile-\\udc00"]');
+    expect(highSurrogate.scope).not.toBe(lowSurrogate.scope);
+    expect(highSurrogate.scope).not.toBe(replacement.scope);
+    expect(lowSurrogate.scope).not.toBe(replacement.scope);
+  });
+
+  it("keeps the legacy default partition scope and incognito persistence", () => {
+    expect(BrowserSession.resolvePartitionScope("environment::legacy", undefined)).toEqual({
+      scope: "environment::legacy",
+      persistent: true,
+    });
+    expect(
+      BrowserSession.resolvePartitionScope("environment::legacy", DEFAULT_BROWSER_PROFILE_ID),
+    ).toEqual({ scope: "environment::legacy", persistent: true });
+    expect(
+      BrowserSession.resolvePartitionScope("environment::legacy", INCOGNITO_BROWSER_PROFILE_ID),
+    ).toEqual({
+      scope: '["environment::legacy","incognito"]',
+      persistent: false,
+      namespace: "profile",
+    });
+  });
 });

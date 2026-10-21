@@ -96,28 +96,63 @@ describe("BrowserImport.importCookies", () => {
   );
 
   it.effect.skipIf(!symlinksSupported)(
-    "refuses to import while the source browser holds its profile",
+    "offers a running Chromium browser on macOS without asking to quit it",
     () =>
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const { importer, root } = yield* withImporter();
-        // The lock Chromium leaves while it is running, dangling target and
-        // all. This must stop the import before it ever asks the keychain.
         yield* fileSystem.symlink("host-that-does-not-exist-1234", `${root}/SingletonLock`);
 
-        const error = yield* importer
-          .importCookies({
-            input: {
-              sourceId: "helium",
-              sourceProfileDirectory: "Default",
-              targetProfileId: "default",
-            },
-            targets: [{ scope: "persist:t3code-preview-test", persistent: true }],
-          })
-          .pipe(Effect.flip);
+        const sources = yield* importer.listSources;
+        const listed = sources.find((source) => source.id === "helium");
 
-        assert.equal(error.reason, "browserRunning");
+        assert.isDefined(listed);
+        assert.isUndefined(listed.unavailable);
+        assert.deepEqual(
+          listed.profiles.map((profile) => profile.directory),
+          ["Default"],
+        );
       }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
+
+  it.effect.skipIf(!symlinksSupported)("refuses to import Firefox while it holds its profile", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3code-import-" });
+      const root = `${home}/.mozilla/firefox`;
+      yield* fileSystem.makeDirectory(`${root}/work.default`, { recursive: true });
+      yield* fileSystem.writeFileString(
+        `${root}/profiles.ini`,
+        "[Profile0]\nName=Work\nIsRelative=1\nPath=work.default\n",
+      );
+      yield* fileSystem.writeFileString(`${root}/work.default/cookies.sqlite`, "db");
+      // The lock Firefox holds while it runs, pointing at this live process.
+      yield* fileSystem.symlink(`127.0.0.1:+${process.pid}`, `${root}/work.default/lock`);
+      const importer = yield* BrowserImport.BrowserImport.pipe(
+        Effect.provide(
+          BrowserImport.layer.pipe(
+            Layer.provide(layerRejectedBeforeSession),
+            Layer.provide(Layer.succeed(HostProcess.Environment, { HOME: home })),
+            Layer.provide(Layer.succeed(HostProcess.Platform, "linux")),
+            Layer.provide(Layer.succeed(HostProcess.ExecutablePath, "/opt/t3code/t3code")),
+            Layer.provide(NodeServices.layer),
+          ),
+        ),
+      );
+
+      const error = yield* importer
+        .importCookies({
+          input: {
+            sourceId: "firefox",
+            sourceProfileDirectory: "work.default",
+            targetProfileId: "default",
+          },
+          targets: [{ scope: "persist:t3code-preview-test", persistent: true }],
+        })
+        .pipe(Effect.flip);
+
+      assert.equal(error.reason, "browserRunning");
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
   );
 });
 

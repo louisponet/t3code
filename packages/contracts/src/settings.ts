@@ -31,6 +31,7 @@ import { ModelSelection } from "./modelSelection.ts";
 import { DEFAULT_PULL_REQUEST_REVIEW_BRIEF } from "./pullRequestReviewBrief.ts";
 import { ProjectScript, type ProjectMutation } from "./project.ts";
 import { DEFAULT_RUNTIME_MODE, RuntimeMode } from "./providerPolicy.ts";
+import { BrowserCookieSyncLink } from "./browserImport.ts";
 import { BrowserProfile, BrowserProfileId, DEFAULT_BROWSER_PROFILE_ID } from "./browserProfile.ts";
 import { EnvironmentToolDefinition, EnvironmentToolId } from "./environmentTools.ts";
 import {
@@ -345,6 +346,10 @@ export const ClientSettingsSchema = Schema.Struct({
 
   browserDefaultProfileId: BrowserProfileId.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_BROWSER_PROFILE_ID)),
+  ),
+
+  browserCookieSyncs: Schema.Array(BrowserCookieSyncLink).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
   ),
 
   confirmQuit: QuitConfirmationModeSetting.pipe(
@@ -1581,6 +1586,7 @@ export const ClientSettingsPatch = Schema.Struct({
   browserAutoShowFloatingPreview: Schema.optionalKey(Schema.Boolean),
   browserProfiles: Schema.optionalKey(Schema.Array(BrowserProfile)),
   browserDefaultProfileId: Schema.optionalKey(BrowserProfileId),
+  browserCookieSyncs: Schema.optionalKey(Schema.Array(BrowserCookieSyncLink)),
   confirmQuit: Schema.optionalKey(QuitConfirmationMode),
   confirmThreadArchive: Schema.optionalKey(Schema.Boolean),
   confirmThreadDelete: Schema.optionalKey(Schema.Boolean),

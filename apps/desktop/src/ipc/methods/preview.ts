@@ -19,8 +19,6 @@ import {
   DesktopPreviewTabInputSchema,
   DesktopPreviewWebviewConfigSchema,
   PreviewAnnotationSubmissionResultSchema,
-  DEFAULT_BROWSER_PROFILE_ID,
-  INCOGNITO_BROWSER_PROFILE_ID,
   PreviewForwardedShortcut,
   MAX_KEYBINDINGS_COUNT,
 } from "@t3tools/contracts";
@@ -32,6 +30,7 @@ import * as NodeURL from "node:url";
 
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
 import * as BrowserImport from "../../preview/BrowserImport/BrowserImport.ts";
+import { resolvePartitionScope } from "../../preview/BrowserSession.ts";
 import * as PreviewManager from "../../preview/Manager.ts";
 import * as DesktopClientSettings from "../../settings/DesktopClientSettings.ts";
 import { PREVIEW_WEBVIEW_PREFERENCES } from "../../preview/WebviewPreferences.ts";
@@ -255,32 +254,6 @@ export const clearCache = DesktopIpc.makeIpcMethod({
     yield* manager.clearCache(yield* resolveClearPartitions(manager, environmentId, profileId));
   }),
 });
-
-/**
- * The default profile keeps the bare environment id it used before profiles
- * existed, so upgrading does not strand anyone's existing logins in an orphaned
- * partition.
- */
-export function resolvePartitionScope(
-  environmentId: string,
-  profileId: string | undefined,
-): {
-  readonly scope: string;
-  readonly persistent: boolean;
-  readonly namespace?: "profile";
-} {
-  if (profileId === undefined || profileId === DEFAULT_BROWSER_PROFILE_ID) {
-    return { scope: environmentId, persistent: true };
-  }
-  // JSON's tuple framing is injective for strings, including lone UTF-16
-  // surrogates (which it escapes). URI encoding throws on those supported ids,
-  // while replacing them with U+FFFD would collapse distinct identities.
-  return {
-    scope: JSON.stringify([environmentId, profileId]),
-    persistent: profileId !== INCOGNITO_BROWSER_PROFILE_ID,
-    namespace: "profile" as const,
-  };
-}
 
 /**
  * Clearing without a profile keeps the historical "everything" behaviour for

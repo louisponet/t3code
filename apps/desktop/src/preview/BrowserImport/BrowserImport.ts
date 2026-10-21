@@ -4,7 +4,7 @@ import type {
   BrowserImportSource,
   BrowserImportUnavailableReason,
 } from "@t3tools/contracts";
-import { BrowserImportFailureReason } from "@t3tools/contracts";
+import { BROWSER_IMPORT_SOURCE_NAMES, BrowserImportFailureReason } from "@t3tools/contracts";
 import type * as Arr from "effect/Array";
 import * as Context from "effect/Context";
 import type { Session } from "electron";
@@ -29,6 +29,7 @@ import {
   isSourceInstalled,
   isSourceRunning,
   listSourceProfiles,
+  sourceMustQuitToRead,
   sourcePathContext,
   type BrowserImportPathContext,
   type BrowserImportSourceDefinition,
@@ -90,7 +91,12 @@ const unavailableReason = Effect.fn("BrowserImport.unavailableReason")(function*
 > {
   if (!definition.platforms.includes(context.platform)) return "unsupportedPlatform";
   if (!(yield* isSourceInstalled(definition, context))) return "notInstalled";
-  if (yield* isSourceRunning(definition, context)) return "browserRunning";
+  if (
+    sourceMustQuitToRead(definition, context.platform) &&
+    (yield* isSourceRunning(definition, context))
+  ) {
+    return "browserRunning";
+  }
   // Safari's jar is found by `stat`, which TCC permits without Full Disk Access
   // — so a Safari that lists as ready may still refuse the read.
   if (definition.engine === "safari") {
@@ -174,7 +180,7 @@ export const make = Effect.gen(function* BrowserImportMake() {
       const unavailable = yield* unavailableReason(definition, pathContext);
       return {
         id: definition.id,
-        name: definition.name,
+        name: BROWSER_IMPORT_SOURCE_NAMES[definition.id],
         profiles:
           unavailable === undefined ? yield* listSourceProfiles(definition, pathContext) : [],
         ...(unavailable === undefined ? {} : { unavailable }),

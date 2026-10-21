@@ -1,10 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as PlatformError from "effect/PlatformError";
-import * as Sink from "effect/Sink";
-import * as Stream from "effect/Stream";
-import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import type { WebContents } from "electron";
 import { beforeEach, vi } from "vite-plus/test";
 
@@ -19,6 +15,7 @@ vi.mock("electron", () => ({
 
 import * as PreviewOnePassword from "./OnePassword.ts";
 import type { FieldDescriptor, LoginSummary } from "./OnePassword.ts";
+import { OnePasswordSession, type OpReply } from "./OnePasswordSession.ts";
 
 const login = (id: string, ...urls: ReadonlyArray<string>): LoginSummary => ({
   id,
@@ -172,51 +169,30 @@ interface OpScript {
   readonly item?: string;
 }
 
-const encoder = new TextEncoder();
-const handle = (exitCode: number, stdout = "") =>
-  ChildProcessSpawner.makeHandle({
-    pid: ChildProcessSpawner.ProcessId(1),
-    exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(exitCode)),
-    isRunning: Effect.succeed(false),
-    kill: () => Effect.void,
-    unref: Effect.succeed(Effect.void),
-    stdin: Sink.drain,
-    stdout: stdout ? Stream.make(encoder.encode(stdout)) : Stream.empty,
-    stderr: Stream.empty,
-    all: Stream.empty,
-    getInputFd: () => Sink.drain,
-    getOutputFd: () => Stream.empty,
+const sessionLayer = (
+  run: (args: ReadonlyArray<string>) => OpReply,
+  calls: Array<ReadonlyArray<string>>,
+) =>
+  Layer.succeed(OnePasswordSession, {
+    run: (command, args) =>
+      Effect.sync(() => {
+        assert.strictEqual(command, "op");
+        calls.push(args);
+        return run(args);
+      }),
   });
 
 const layerFor = (script: OpScript, calls: Array<ReadonlyArray<string>>) =>
   PreviewOnePassword.layer.pipe(
     Layer.provide(
-      Layer.succeed(
-        ChildProcessSpawner.ChildProcessSpawner,
-        ChildProcessSpawner.make((command) => {
-          const { args, options } = command as unknown as {
-            readonly args: ReadonlyArray<string>;
-            readonly options: { readonly detached?: boolean };
-          };
-          // 1Password approves per session; a detached child asks on every call.
-          assert.strictEqual(options.detached, false);
-          calls.push(args);
-          if (args[1] === "list") {
-            const list = script.list ?? { exitCode: 0, stdout: "[]" };
-            if (list === "missing") {
-              return Effect.fail(
-                PlatformError.systemError({
-                  _tag: "NotFound",
-                  module: "ChildProcess",
-                  method: "spawn",
-                }),
-              );
-            }
-            return Effect.succeed(handle(list.exitCode, list.stdout));
-          }
-          return Effect.succeed(handle(0, script.item ?? "{}"));
-        }),
-      ),
+      sessionLayer((args): OpReply => {
+        if (args[1] === "list") {
+          const list = script.list ?? { exitCode: 0, stdout: "[]" };
+          if (list === "missing") return { _tag: "NotFound" };
+          return { _tag: "Exited", exitCode: list.exitCode, stdout: list.stdout ?? "" };
+        }
+        return { _tag: "Exited", exitCode: 0, stdout: script.item ?? "{}" };
+      }, calls),
     ),
   );
 
@@ -385,15 +361,10 @@ describe("PreviewOnePassword.fill", () => {
     ]);
     const layer = PreviewOnePassword.layer.pipe(
       Layer.provide(
-        Layer.succeed(
-          ChildProcessSpawner.ChildProcessSpawner,
-          ChildProcessSpawner.make((command) => {
-            const { args } = command as unknown as { readonly args: ReadonlyArray<string> };
-            calls.push(args);
-            if (args[1] === "get") mainFrame.origin = "https://evil.example";
-            return Effect.succeed(handle(0, args[1] === "list" ? LIST : ITEM));
-          }),
-        ),
+        sessionLayer((args): OpReply => {
+          if (args[1] === "get") mainFrame.origin = "https://evil.example";
+          return { _tag: "Exited", exitCode: 0, stdout: args[1] === "list" ? LIST : ITEM };
+        }, calls),
       ),
     );
     return fill(guest).pipe(

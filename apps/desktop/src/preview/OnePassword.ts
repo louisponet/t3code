@@ -5,11 +5,9 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import * as Stream from "effect/Stream";
-import * as ChildProcess from "effect/process/ChildProcess";
-import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import { getDomain } from "tldts";
 
+import { OnePasswordSession } from "./OnePasswordSession.ts";
 import { isTrustworthyOrigin } from "./Passkeys.ts";
 
 export type FillField = "username" | "password" | "otp";
@@ -255,46 +253,29 @@ export class PreviewOnePassword extends Context.Service<
 >()("@t3tools/desktop/preview/OnePassword/PreviewOnePassword") {}
 
 const make = Effect.gen(function* () {
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const session = yield* OnePasswordSession;
   const pending = new WeakSet<WebContents>();
   // Multi-step sign-ins (Google asks for the email, password, and code on
   // separate pages) preselect the login picked on the previous step.
   const lastPicked = new Map<string, string>();
 
   const runOp = (args: ReadonlyArray<string>, onFailure: "locked" | "failed") =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const handle = yield* spawner.spawn(
-          // 1Password approves `op` per session, so a detached (setsid) child
-          // would ask the person again on every call.
-          ChildProcess.make("op", args, {
-            stdin: "ignore",
-            stderr: "ignore",
-            extendEnv: true,
-            detached: false,
-          }),
-        );
-        const [stdout, exitCode] = yield* Effect.all(
-          [handle.stdout.pipe(Stream.decodeText(), Stream.mkString), handle.exitCode],
-          { concurrency: "unbounded" },
-        );
-        if (exitCode !== 0) {
-          return yield* new OnePasswordCliError({ reason: onFailure, exitCode });
-        }
-        return stdout;
-      }),
-    ).pipe(
+    session.run("op", args).pipe(
       Effect.timeout(OP_TIMEOUT),
-      Effect.mapError((error) =>
-        error._tag === "OnePasswordCliError"
-          ? error
-          : new OnePasswordCliError({
-              reason:
-                error._tag === "PlatformError" && error.reason._tag === "NotFound"
-                  ? "not-installed"
-                  : "failed",
-            }),
-      ),
+      Effect.mapError(() => new OnePasswordCliError({ reason: "failed" })),
+      Effect.flatMap((reply) => {
+        if (reply._tag === "NotFound") {
+          return Effect.fail(new OnePasswordCliError({ reason: "not-installed" }));
+        }
+        if (reply._tag === "Lost")
+          return Effect.fail(new OnePasswordCliError({ reason: "failed" }));
+        if (reply.exitCode !== 0) {
+          return Effect.fail(
+            new OnePasswordCliError({ reason: onFailure, exitCode: reply.exitCode ?? undefined }),
+          );
+        }
+        return Effect.succeed(reply.stdout);
+      }),
     );
 
   const listLogins = runOp(

@@ -517,6 +517,7 @@ export function PreviewView({
         ...(nativeServerTab && previewBridge
           ? {
               openDevTools: desktopCall(previewBridge.openDevTools),
+              fillFromOnePassword: handleFillFromOnePassword,
               toggleNativePictureInPicture: () => handleNativePictureInPicture(),
             }
           : {}),

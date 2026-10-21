@@ -245,8 +245,15 @@ const chooseLogin = async (
 export class PreviewOnePassword extends Context.Service<
   PreviewOnePassword,
   {
-    /** Human-triggered only: callers must not expose this to agents or preview automation. */
-    readonly fill: (guest: WebContents) => Effect.Effect<DesktopPreviewPasswordFillResult>;
+    /**
+     * Human-triggered only: callers must not expose this to agents or preview
+     * automation. `holdAgentCommands` stops agent input to the page while the
+     * fields are typed into and returns the release.
+     */
+    readonly fill: (
+      guest: WebContents,
+      holdAgentCommands: () => () => void,
+    ) => Effect.Effect<DesktopPreviewPasswordFillResult>;
   }
 >()("@t3tools/desktop/preview/OnePassword/PreviewOnePassword") {}
 
@@ -369,7 +376,10 @@ const make = Effect.gen(function* () {
     return "filled" as const;
   });
 
-  const fill = Effect.fn("PreviewOnePassword.fill")(function* (guest: WebContents) {
+  const fill = Effect.fn("PreviewOnePassword.fill")(function* (
+    guest: WebContents,
+    holdAgentCommands: () => () => void,
+  ) {
     if (pending.has(guest) || guest.isDestroyed()) return "cancelled" as const;
     // Read before any await: the page cannot claim an origin, and a navigation
     // during the lookup must not redirect the fill.
@@ -385,7 +395,11 @@ const make = Effect.gen(function* () {
       const credentials = yield* getCredentials(login.id);
       if (!sameDocument(guest, origin)) return "cancelled" as const;
       remembered.set(guest, { origin, id: login.id, at: now });
-      return yield* fillFields(guest, origin, credentials);
+      return yield* Effect.acquireUseRelease(
+        Effect.sync(holdAgentCommands),
+        () => fillFields(guest, origin, credentials),
+        (release) => Effect.sync(release),
+      );
     }).pipe(
       Effect.catch((error) =>
         Effect.logWarning("1Password fill failed", {

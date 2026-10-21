@@ -249,24 +249,44 @@ const ITEM = JSON.stringify({
   ],
 });
 
-const fill = (guest: WebContents) =>
-  Effect.flatMap(PreviewOnePassword.PreviewOnePassword, (service) => service.fill(guest));
+const fill = (guest: WebContents, holdAgentCommands = () => () => {}) =>
+  Effect.flatMap(PreviewOnePassword.PreviewOnePassword, (service) =>
+    service.fill(guest, holdAgentCommands),
+  );
 
 describe("PreviewOnePassword.fill", () => {
   beforeEach(() => {
     electron.showMessageBox.mockReset();
   });
 
-  it.effect("fills the matching login into the detected fields", () => {
+  it.effect("fills the matching login into the detected fields while agents are held", () => {
     const calls: Array<ReadonlyArray<string>> = [];
     const { guest, inserted } = fakeGuest("https://accounts.google.com", [
       field({ type: "password", autocomplete: "current-password" }),
       field({ type: "tel", hint: "totpPin" }),
     ]);
-    return fill(guest).pipe(
+    const events: Array<string> = [];
+    let held = false;
+    const insertText = guest.insertText.bind(guest);
+    Object.assign(guest, {
+      insertText: (text: string) => {
+        events.push(held ? "insert held" : "insert free");
+        return insertText(text);
+      },
+    });
+    const hold = () => {
+      held = true;
+      events.push("hold");
+      return () => {
+        held = false;
+        events.push("release");
+      };
+    };
+    return fill(guest, hold).pipe(
       Effect.tap((result) =>
         Effect.sync(() => {
           assert.strictEqual(result, "filled");
+          assert.deepStrictEqual(events, ["hold", "insert held", "insert held", "release"]);
           assert.deepStrictEqual(inserted, ["hunter2", "123456"]);
           assert.deepStrictEqual(calls[1], ["item", "get", "g1", "--format", "json", "--reveal"]);
           assert.strictEqual(electron.showMessageBox.mock.calls.length, 0);

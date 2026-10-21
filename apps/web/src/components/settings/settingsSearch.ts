@@ -878,6 +878,22 @@ export const SETTINGS_SEARCH_ITEMS = [
     scope: "project-defaults",
   },
   {
+    id: "pull-request-review-model",
+    title: "Review thread model",
+    to: "/settings/source-control",
+    searchTerms: ["pull request pr review thread lead reviewer agent model"],
+    environmentOnly: true,
+    scope: "project-defaults",
+  },
+  {
+    id: "pull-request-review-brief",
+    title: "Review thread brief",
+    to: "/settings/source-control",
+    searchTerms: ["pull request pr review thread brief prompt instructions message"],
+    environmentOnly: true,
+    scope: "project-defaults",
+  },
+  {
     id: "project-actions",
     title: "Actions",
     to: "/settings/projects",

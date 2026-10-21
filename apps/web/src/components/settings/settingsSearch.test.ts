@@ -193,6 +193,8 @@ describe("searchSettings", () => {
       "source-control-writer-model",
       "review-guide-model",
       "review-guide-instructions",
+      "pull-request-review-model",
+      "pull-request-review-brief",
       "source-control-writing-style",
       "t3-connect",
       "hold-webhooks-while-offline",

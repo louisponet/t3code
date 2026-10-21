@@ -23,40 +23,60 @@ export function usePreviewPanelInlineSize(
   options: {
     readonly enabled?: boolean | undefined;
     readonly widthStorageKey?: string | undefined;
-    readonly defaultWidth?: number | undefined;
+    /** `"half"` splits the measured row evenly with the column beside the panel. */
+    readonly defaultWidth?: number | "half" | undefined;
     readonly container?: HTMLElement | null | undefined;
+    /** Remeasures the half default each time the panel opens. */
+    readonly open?: boolean | undefined;
   } = {},
 ): PreviewPanelInlineSize {
-  const maxWidth = useViewportClampedMaxWidth(hostRef, options.enabled ?? true, options.container);
-  return useResizableWidth({
+  const half = options.defaultWidth === "half";
+  // Half the row is only measured while no width is stored and the default can apply.
+  const [trackHalfRowWidth, setTrackHalfRowWidth] = useState(false);
+  const { maxWidth, halfRowWidth } = useViewportClampedMaxWidth(
+    hostRef,
+    options.enabled ?? true,
+    options.container,
+    trackHalfRowWidth && options.open !== false,
+  );
+  const { width, handlers, hasStoredWidth } = useResizableWidth({
     storageKey: options.widthStorageKey ?? PREVIEW_PANEL_WIDTH_STORAGE_KEY,
-    defaultWidth: options.defaultWidth ?? PREVIEW_PANEL_DEFAULT_WIDTH,
+    defaultWidth: half
+      ? (halfRowWidth ?? PREVIEW_PANEL_DEFAULT_WIDTH)
+      : (options.defaultWidth ?? PREVIEW_PANEL_DEFAULT_WIDTH),
     minWidth: PREVIEW_PANEL_MIN_WIDTH,
     maxWidth,
     edge: "left",
   });
+  if (trackHalfRowWidth !== (half && !hasStoredWidth))
+    setTrackHalfRowWidth(half && !hasStoredWidth);
+  return { width, handlers };
 }
 
 function useViewportClampedMaxWidth(
   hostRef: RefObject<HTMLElement | null> | undefined,
   enabled: boolean,
   container: HTMLElement | null | undefined,
-): number {
+  trackHalfRowWidth: boolean,
+): { maxWidth: number; halfRowWidth: number | null } {
   const [maxWidth, setMaxWidth] = useState(() =>
     getPreviewPanelMaxWidth(typeof window === "undefined" ? 1280 : window.innerWidth),
   );
+  const [halfRowWidth, setHalfRowWidth] = useState<number | null>(null);
   useLayoutEffect(() => {
     if (typeof window === "undefined") return;
     const row = container ?? (enabled ? hostRef?.current?.parentElement : null) ?? null;
     // Measure before first paint: the persisted width must be clamped against
     // the row on the initial render, not one observer tick later (the panel
-    // would flash over-wide on every mount). Only the derived cap is stored: the
-    // row resizes every frame of a sidebar drag, but the cap rarely moves, and an
-    // unchanged cap skips re-rendering the panel's owner.
+    // would flash over-wide on every mount). Only derived values are stored, so a
+    // row resize that leaves them unchanged skips re-rendering the panel's owner.
     const measure = () => {
       setMaxWidth(getPreviewPanelMaxWidth(window.innerWidth, row?.clientWidth));
     };
     measure();
+    // Taken once when the default starts applying, not per resize: the row resizes every frame
+    // of a sidebar drag, and the cap above already keeps the panel inside it.
+    if (trackHalfRowWidth && row) setHalfRowWidth(Math.floor(row.clientWidth / 2));
     let frame = 0;
     const onResize = () => {
       if (frame !== 0) return;
@@ -72,8 +92,8 @@ function useViewportClampedMaxWidth(
       if (frame !== 0) window.cancelAnimationFrame(frame);
       stopObserving?.();
     };
-  }, [container, hostRef, enabled]);
-  return maxWidth;
+  }, [container, hostRef, enabled, trackHalfRowWidth]);
+  return { maxWidth, halfRowWidth };
 }
 export function getPreviewPanelMaxWidth(viewportWidth: number, containerWidth?: number): number {
   const fractionCap = Math.floor(viewportWidth * PREVIEW_PANEL_MAX_WIDTH_FRACTION);

@@ -3,6 +3,10 @@ import { Spinner } from "~/components/ui/spinner";
 import { useShortcutModifierState } from "~/shortcutModifierState";
 import type { PullRequestSpeedActionResult } from "~/components/pullRequest/PullRequestSpeedActions";
 import { usePullRequestCloseBatch } from "~/components/pullRequest/usePullRequestActions";
+import {
+  reviewTargetKey,
+  usePullRequestReviewThread,
+} from "~/components/pullRequest/pullRequestReviewThread";
 import { SidebarPointerSensor } from "~/components/Sidebar.pointer";
 import { resolveSidebarSweepKeys } from "~/components/Sidebar.logic";
 import { sortProjectsByGroupOrder } from "@t3tools/client-runtime/state/project-grouping";
@@ -832,6 +836,7 @@ function PullRequestsRouteView() {
     // Some hosts accept a merge before it completes. Let the next host read declare it merged.
     if (action !== "merge") overrideEntry(entry, action);
   };
+  const reviewThread = usePullRequestReviewThread();
   const onSpeedAction = useCallback((result: PullRequestSpeedActionResult) => {
     speedActionRef.current(result);
   }, []);
@@ -1706,6 +1711,8 @@ function PullRequestsRouteView() {
                     closing={closingKeys.has(entryKey)}
                     sweeping={closeSweepKeys.has(entryKey)}
                     onCloseSweepStart={startCloseSweep}
+                    onReview={reviewThread.review}
+                    reviewPending={reviewThread.pendingKeys.has(reviewTargetKey(entry))}
                   />
                 );
               })}

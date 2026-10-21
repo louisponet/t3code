@@ -28,6 +28,7 @@ import {
   ProviderOptionSelections,
 } from "./model.ts";
 import { ModelSelection } from "./modelSelection.ts";
+import { DEFAULT_PULL_REQUEST_REVIEW_BRIEF } from "./pullRequestReviewBrief.ts";
 import { ProjectScript, type ProjectMutation } from "./project.ts";
 import { DEFAULT_RUNTIME_MODE, RuntimeMode } from "./providerPolicy.ts";
 import { BrowserProfile, BrowserProfileId, DEFAULT_BROWSER_PROFILE_ID } from "./browserProfile.ts";
@@ -893,6 +894,8 @@ export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
   "sourceControlWriterModelSelection",
   "reviewGuideModelSelection",
   "reviewGuideInstructions",
+  "pullRequestReviewModelSelection",
+  "pullRequestReviewBrief",
   "sourceControlWritingStyle",
   "removeAgentCreditsOnMerge",
   "branchNamingMode",
@@ -937,6 +940,8 @@ export const ProjectSettingsOverrides = Schema.Struct({
   sourceControlWriterModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   reviewGuideModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   reviewGuideInstructions: Schema.optionalKey(TrimmedString),
+  pullRequestReviewModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
+  pullRequestReviewBrief: Schema.optionalKey(TrimmedString),
   sourceControlWritingStyle: Schema.optionalKey(SourceControlWritingStyleSettings),
   removeAgentCreditsOnMerge: Schema.optionalKey(Schema.Boolean),
   branchNamingMode: Schema.optionalKey(BranchNamingMode),
@@ -972,6 +977,7 @@ const NULLABLE_PROJECT_SETTINGS_OVERRIDES: ReadonlySet<ProjectScopedServerSettin
   "defaultModelSelection",
   "sourceControlWriterModelSelection",
   "reviewGuideModelSelection",
+  "pullRequestReviewModelSelection",
   "pullRequestMergeMethod",
   "sidebarAutoSettleAfterDays",
 ]);
@@ -1189,6 +1195,12 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
   reviewGuideInstructions: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  pullRequestReviewModelSelection: Schema.NullOr(ModelSelection).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  pullRequestReviewBrief: TrimmedString.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_PULL_REQUEST_REVIEW_BRIEF)),
+  ),
 
   pullRequestMergeMethod: Schema.NullOr(PullRequestMergeMethod).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
@@ -1460,6 +1472,8 @@ export const ServerSettingsPatch = Schema.Struct({
   reviewGuidesEnabled: Schema.optionalKey(Schema.Boolean),
   reviewGuideModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   reviewGuideInstructions: Schema.optionalKey(TrimmedString),
+  pullRequestReviewModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
+  pullRequestReviewBrief: Schema.optionalKey(TrimmedString),
   pullRequestMergeMethod: Schema.optionalKey(Schema.NullOr(PullRequestMergeMethod)),
   pullRequestRepository: Schema.optionalKey(PullRequestRepository),
   observability: Schema.optionalKey(

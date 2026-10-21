@@ -1,16 +1,15 @@
 import { findReusableHelixReviewThread, isArchivedHelixReviewThread } from "./helixReviewThread";
+import { resolveNewThreadModelSelection } from "./pullRequestReviewThread";
 import { useEnvironmentSettings } from "~/hooks/useSettings";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
-import { useProject, useThreadShells, readThreadShells } from "~/state/entities";
+import { useProject, useServerConfigs, useThreadShells, readThreadShells } from "~/state/entities";
+import { EMPTY_SERVER_PROVIDERS } from "~/state/server";
 import { useEnvironmentQuery } from "~/state/query";
 import { pullRequestEnvironment } from "~/state/pullRequests";
 import { randomUUID } from "~/lib/utils";
 import { useAtomValue } from "@effect/atom-react";
 import {
-  DEFAULT_MODEL,
-  DEFAULT_MODEL_BY_PROVIDER,
   DEFAULT_RUNTIME_MODE,
-  ProviderInstanceId,
   ThreadId,
   type EnvironmentId,
   type PullRequestDetailView,
@@ -82,20 +81,14 @@ export default function PullRequestCodeTab({
     reviews.delete(key);
     linkedReviews.delete(key);
   }, [reviewArchived, key]);
-  const preferredInstance = Object.entries(environmentSettings.providerInstances).find(
-    ([, instance]) => instance.enabled !== false,
+  const serverConfigs = useServerConfigs();
+  const modelSelection = resolveNewThreadModelSelection(
+    environmentSettings,
+    serverConfigs.get(environmentId)?.providers ?? EMPTY_SERVER_PROVIDERS,
+    projectSettings.settings.defaultModelSelection,
+    threads,
+    { environmentId, projectId: reference.projectId },
   );
-  const modelSelection = projectSettings.settings.defaultModelSelection ??
-    threads.find(
-      (thread) =>
-        thread.environmentId === environmentId && thread.projectId === reference.projectId,
-    )?.modelSelection ??
-    threads.find((thread) => thread.environmentId === environmentId)?.modelSelection ?? {
-      instanceId: ProviderInstanceId.make(preferredInstance?.[0] ?? "codex"),
-      model:
-        (preferredInstance ? DEFAULT_MODEL_BY_PROVIDER[preferredInstance[1].driver] : undefined) ??
-        DEFAULT_MODEL,
-    };
   const prepare = usePreparePullRequestThreadAction({ environmentId, cwd: detail.workspaceRoot });
   const create = useAtomCommand(threadEnvironment.create, { reportFailure: false });
   const linking = usePullRequestLinking(environmentId);

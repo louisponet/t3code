@@ -35,11 +35,13 @@ export interface ResizableWidthHandlers {
 
 /**
  * Width is read on mount or storage-key changes and persisted on drag-end (not on every rAF tick
- * — would otherwise be ~60 writes/sec).
+ * — would otherwise be ~60 writes/sec). Until a width is stored, the current `defaultWidth` applies,
+ * so a default derived from the layout follows it.
  */
 export function useResizableWidth(options: UseResizableWidthOptions): {
   readonly width: number;
   readonly handlers: ResizableWidthHandlers;
+  readonly hasStoredWidth: boolean;
 } {
   const { storageKey, defaultWidth, minWidth, maxWidth, edge } = options;
 
@@ -51,14 +53,13 @@ export function useResizableWidth(options: UseResizableWidthOptions): {
     [defaultWidth, maxWidth, minWidth],
   );
 
-  const readWidth = () => {
-    if (typeof window === "undefined") return defaultWidth;
+  const readWidth = (): number | null => {
+    if (typeof window === "undefined") return null;
     try {
-      const stored = getLocalStorageItem(storageKey, WidthSchema);
-      return clamp(stored ?? defaultWidth);
+      return getLocalStorageItem(storageKey, WidthSchema);
     } catch (error) {
       console.error("Could not read persisted panel width.", error);
-      return defaultWidth;
+      return null;
     }
   };
   const [widthState, setWidthState] = useState(() => ({ storageKey, width: readWidth() }));
@@ -66,7 +67,7 @@ export function useResizableWidth(options: UseResizableWidthOptions): {
     setWidthState({ storageKey, width: readWidth() });
   }
 
-  const clampedWidth = clamp(widthState.width);
+  const clampedWidth = clamp(widthState.width ?? defaultWidth);
   const latestOptions = useRef({ clamp, storageKey, width: clampedWidth });
   useLayoutEffect(() => {
     latestOptions.current = { clamp, storageKey, width: clampedWidth };
@@ -107,5 +108,5 @@ export function useResizableWidth(options: UseResizableWidthOptions): {
   // rewrites the committed width, so re-apply the live pointer position.
   useLayoutEffect(refresh, [clamp, clampedWidth, refresh]);
 
-  return { width: clampedWidth, handlers };
+  return { width: clampedWidth, handlers, hasStoredWidth: widthState.width !== null };
 }

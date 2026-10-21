@@ -1,6 +1,6 @@
-import type { PullRequestAction } from "@t3tools/contracts";
+import { AuthOrchestrationOperateScope, type PullRequestAction } from "@t3tools/contracts";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
-import { SearchIcon } from "lucide-react";
+import { BotIcon, SearchIcon } from "lucide-react";
 import { PullRequestStackPopover } from "./PullRequestStackPopover";
 import {
   PullRequestSpeedActions,
@@ -9,8 +9,11 @@ import {
 import { memo, type RefCallback } from "react";
 
 import { cn } from "~/lib/utils";
+import { useEnvironmentScope } from "~/state/session";
 import { getSourceControlPresentationForKind } from "~/sourceControlPresentation";
 
+import { Button } from "../ui/button";
+import { Spinner } from "../ui/spinner";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { PullRequestChecksPopover } from "./PullRequestChecksPopover";
 import type { EnvironmentPullRequestEntry } from "./pullRequestList.logic";
@@ -87,6 +90,8 @@ function PullRequestRowImpl({
   closing = false,
   sweeping = false,
   onCloseSweepStart,
+  onReview,
+  reviewPending = false,
 }: {
   entry: EnvironmentPullRequestEntry;
   selected: boolean;
@@ -104,6 +109,8 @@ function PullRequestRowImpl({
   closing?: boolean;
   sweeping?: boolean;
   onCloseSweepStart?: (entry: EnvironmentPullRequestEntry, event: PointerEvent) => void;
+  onReview?: (entry: EnvironmentPullRequestEntry) => void;
+  reviewPending?: boolean;
 }) {
   const { Icon, providerName } = getSourceControlPresentationForKind(entry.provider);
   return (
@@ -112,7 +119,7 @@ function PullRequestRowImpl({
       data-pull-request-stats-key={statsKey}
       data-pull-request-key={statsKey}
       className={cn(
-        "flex items-center rounded-md [content-visibility:auto] [contain-intrinsic-block-size:56.5px]",
+        "group/pr-item flex items-center rounded-md [content-visibility:auto] [contain-intrinsic-block-size:56.5px]",
         selected ? "bg-accent" : "hover:bg-accent/60",
       )}
     >
@@ -235,6 +242,9 @@ function PullRequestRowImpl({
           updatedAt={entry.updatedAt}
         />
       </button>
+      {onReview ? (
+        <PullRequestReviewButton entry={entry} pending={reviewPending} onReview={onReview} />
+      ) : null}
       {hostActions.size > 0 ? (
         <PullRequestSpeedActions
           entry={entry}
@@ -246,6 +256,47 @@ function PullRequestRowImpl({
           {...(onCloseSweepStart ? { onCloseSweepStart } : {})}
         />
       ) : null}
+    </div>
+  );
+}
+
+function PullRequestReviewButton({
+  entry,
+  pending,
+  onReview,
+}: {
+  entry: EnvironmentPullRequestEntry;
+  pending: boolean;
+  onReview: (entry: EnvironmentPullRequestEntry) => void;
+}) {
+  const canOperate = useEnvironmentScope(entry.environmentId, AuthOrchestrationOperateScope);
+  if (!canOperate) return null;
+  return (
+    <div
+      className={cn(
+        "shrink-0 items-center pr-3",
+        pending ? "flex" : "hidden group-focus-within/pr-item:flex group-hover/pr-item:flex",
+      )}
+    >
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant="outline"
+              size="xs"
+              disabled={pending}
+              aria-label={`Review #${entry.number} in a thread`}
+              onClick={() => onReview(entry)}
+            />
+          }
+        >
+          {pending ? <Spinner size="xs" /> : <BotIcon aria-hidden className="size-3" />}
+          Review
+        </TooltipTrigger>
+        <TooltipPopup>
+          Open this PR's review thread, or start one with your review brief
+        </TooltipPopup>
+      </Tooltip>
     </div>
   );
 }

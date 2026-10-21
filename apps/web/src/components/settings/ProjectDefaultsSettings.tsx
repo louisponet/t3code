@@ -1,5 +1,6 @@
 import {
   DEFAULT_SERVER_SETTINGS,
+  PULL_REQUEST_REVIEW_BRIEF_URL_PLACEHOLDER,
   type ModelSelection,
   type ProviderInstanceId,
   type WorktreeSubmodules,
@@ -7,6 +8,7 @@ import {
 import { createModelSelection } from "@t3tools/shared/model";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { useNavigate } from "@tanstack/react-router";
+import { useRef } from "react";
 
 import { mergeEnvironmentSettings } from "../../hooks/useSettings";
 import { getCustomModelOptionsByInstance } from "../../modelSelection";
@@ -26,6 +28,7 @@ import { TraitsPicker } from "../chat/TraitsPicker";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { toastManager } from "../ui/toast";
 import { Switch } from "../ui/switch";
+import { Textarea } from "../ui/textarea";
 import type { ProjectSettingsCategory } from "./ProjectSettingsPanel";
 import { searchableSetting } from "./settingsSearch";
 import { useSettingsScope } from "./SettingsScopeContext";
@@ -42,6 +45,8 @@ import {
   useUpdateScopedSettings,
 } from "./useScopedSettings";
 
+type ModelSettingKey = "defaultModelSelection" | "pullRequestReviewModelSelection";
+
 const WORKTREE_SUBMODULES_OPTIONS = ["recursive", "top-level", "none"] as const;
 function isWorktreeSubmodules(value: string | null): value is WorktreeSubmodules {
   return value !== null && (WORKTREE_SUBMODULES_OPTIONS as readonly string[]).includes(value);
@@ -57,7 +62,6 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
     ? environments.find((environment) => environment.environmentId === target.environmentId)
     : undefined;
   const providers = representative?.serverConfig?.providers ?? EMPTY_SERVER_PROVIDERS;
-  const selection = resolveDefaultProviderModelSelection(providers, settings.defaultModelSelection);
   const entries = sortProviderInstanceEntries(
     applyProviderInstanceSettings(
       deriveProviderInstanceEntries(providers),
@@ -65,14 +69,12 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
       target?.projectId ?? null,
     ),
   );
-  const modelOptions = getCustomModelOptionsByInstance(
-    settings,
-    providers,
-    selection?.instanceId,
-    selection?.model,
-  );
-  const activeEntry = entries.find((entry) => entry.instanceId === selection?.instanceId);
-  const mixedModel = useScopedSettingsMixed(["defaultModelSelection"]);
+  const mixedModel = {
+    defaultModelSelection: useScopedSettingsMixed(["defaultModelSelection"]),
+    pullRequestReviewModelSelection: useScopedSettingsMixed(["pullRequestReviewModelSelection"]),
+  };
+  const mixedReviewBrief = useScopedSettingsMixed(["pullRequestReviewBrief"]);
+  const reviewBriefEdited = useRef(false);
   const mixedPermissions = useScopedSettingsMixed(["defaultRuntimeMode"]);
   const PermissionIcon = runtimeModeConfig[settings.defaultRuntimeMode].icon;
   const mixedWorkspace = useScopedSettingsMixed(["defaultThreadEnvMode"]);
@@ -82,7 +84,10 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
   const mixedAgentCredits = useScopedSettingsMixed(["removeAgentCreditsOnMerge"]);
   const mixedMergeMethod = useScopedSettingsMixed(["pullRequestMergeMethod"]);
   const mixedPrRepository = useScopedSettingsMixed(["pullRequestRepository"]);
-  const modelSource = useScopedSettingSource(["defaultModelSelection"]);
+  const modelSource = {
+    defaultModelSelection: useScopedSettingSource(["defaultModelSelection"]),
+    pullRequestReviewModelSelection: useScopedSettingSource(["pullRequestReviewModelSelection"]),
+  };
   const isProjectScope = scope.kind === "project" || scope.kind === "checkout";
   const unavailable = connectedEnvironments.length === 0;
   const effective = target
@@ -118,86 +123,109 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
     return null;
   }
 
-  const setModel = (value: ModelSelection | null) => {
-    const reason = value ? modelDisabledReason(value.instanceId, value.model) : null;
-    if (reason) {
-      toastManager.add({ type: "error", title: "Default model not saved", description: reason });
-      return;
-    }
-    updateSettings({ defaultModelSelection: value });
-  };
-
   const modelRow = (
-    <SettingsRow
-      serverScoped
-      settingKeys={["defaultModelSelection"]}
-      mixed={mixedModel}
-      id="default-model"
-      title="Model"
-      description={
-        isProjectScope
-          ? "Model for new threads in this project."
-          : "Default model for new threads. Projects can override it."
+    key: ModelSettingKey,
+    row: { id: string; title: string; description: string; resetLabel: string },
+  ) => {
+    const value = settings[key];
+    const mixed = mixedModel[key];
+    const selection = resolveDefaultProviderModelSelection(
+      providers,
+      value ?? settings.defaultModelSelection,
+    );
+    const modelOptions = getCustomModelOptionsByInstance(
+      settings,
+      providers,
+      selection?.instanceId,
+      selection?.model,
+    );
+    const activeEntry = entries.find((entry) => entry.instanceId === selection?.instanceId);
+    const setModel = (next: ModelSelection | null) => {
+      const reason = next ? modelDisabledReason(next.instanceId, next.model) : null;
+      if (reason) {
+        toastManager.add({ type: "error", title: `${row.title} not saved`, description: reason });
+        return;
       }
-      status={
-        unavailable || mixedModel || modelSource === "project"
-          ? undefined
-          : settings.defaultModelSelection === null
-            ? "Automatic"
-            : undefined
-      }
-      resetAction={
-        settings.defaultModelSelection !== null ? (
-          <SettingResetButton label="default model" onClick={() => setModel(null)} />
-        ) : null
-      }
-      control={
-        selection && activeEntry ? (
-          <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
-            <ProviderModelPicker
-              environmentId={representative?.environmentId ?? null}
-              activeInstanceId={selection.instanceId}
-              model={selection.model}
-              lockedProvider={null}
-              instanceEntries={entries}
-              modelOptionsByInstance={modelOptions}
-              triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-              {...(mixedModel ? { triggerLabel: "Mixed" } : {})}
-              getModelDisabledReason={modelDisabledReason}
-              onOpenProviderSetup={(instanceId) => {
-                if (representative)
-                  void navigate({
-                    to: "/settings/providers",
-                    search: { environmentId: representative.environmentId, instanceId },
-                  });
-              }}
-              onInstanceModelChange={(instanceId, model) =>
-                setModel(createModelSelection(instanceId, model))
-              }
-            />
-            {!mixedModel ? (
-              <TraitsPicker
-                provider={activeEntry.driverKind}
-                models={activeEntry.models}
+      updateSettings({ [key]: next });
+    };
+    return (
+      <SettingsRow
+        serverScoped
+        settingKeys={[key]}
+        mixed={mixed}
+        id={row.id}
+        title={row.title}
+        description={row.description}
+        status={
+          unavailable || mixed || modelSource[key] === "project"
+            ? undefined
+            : value === null
+              ? key === "defaultModelSelection"
+                ? "Automatic"
+                : "Default thread model"
+              : undefined
+        }
+        resetAction={
+          value !== null ? (
+            <SettingResetButton label={row.resetLabel} onClick={() => setModel(null)} />
+          ) : null
+        }
+        control={
+          selection && activeEntry ? (
+            <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
+              <ProviderModelPicker
+                environmentId={representative?.environmentId ?? null}
+                activeInstanceId={selection.instanceId}
                 model={selection.model}
-                prompt=""
-                onPromptChange={() => {}}
-                modelOptions={selection.options ?? []}
-                allowPromptInjectedEffort={false}
-                planModeEnabled={settings.planModeEnabled}
+                lockedProvider={null}
+                instanceEntries={entries}
+                modelOptionsByInstance={modelOptions}
                 triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-                onModelOptionsChange={(options) =>
-                  setModel(createModelSelection(selection.instanceId, selection.model, options))
+                {...(mixed ? { triggerLabel: "Mixed" } : {})}
+                getModelDisabledReason={modelDisabledReason}
+                onOpenProviderSetup={(instanceId) => {
+                  if (representative)
+                    void navigate({
+                      to: "/settings/providers",
+                      search: { environmentId: representative.environmentId, instanceId },
+                    });
+                }}
+                onInstanceModelChange={(instanceId, model) =>
+                  setModel(createModelSelection(instanceId, model))
                 }
               />
-            ) : null}
-          </div>
-        ) : (
-          <span className="text-sm text-muted-foreground">No providers available</span>
-        )
-      }
-    />
-  );
+              {!mixed ? (
+                <TraitsPicker
+                  provider={activeEntry.driverKind}
+                  models={activeEntry.models}
+                  model={selection.model}
+                  prompt=""
+                  onPromptChange={() => {}}
+                  modelOptions={selection.options ?? []}
+                  allowPromptInjectedEffort={false}
+                  planModeEnabled={settings.planModeEnabled}
+                  triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
+                  onModelOptionsChange={(options) =>
+                    setModel(createModelSelection(selection.instanceId, selection.model, options))
+                  }
+                />
+              ) : null}
+            </div>
+          ) : (
+            <span className="text-sm text-muted-foreground">No providers available</span>
+          )
+        }
+      />
+    );
+  };
+  const defaultModelRow = modelRow("defaultModelSelection", {
+    id: "default-model",
+    title: "Model",
+    description: isProjectScope
+      ? "Model for new threads in this project."
+      : "Default model for new threads. Projects can override it.",
+    resetLabel: "default model",
+  });
   const workspaceRow = (
     <SettingsRow
       serverScoped
@@ -265,12 +293,12 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
     >
       {category === "project" ? (
         <>
-          {modelRow}
+          {defaultModelRow}
           {workspaceRow}
         </>
       ) : category === "general" ? (
         <>
-          {modelRow}
+          {defaultModelRow}
           <SettingsRow
             serverScoped
             settingKeys={["defaultRuntimeMode"]}
@@ -382,6 +410,56 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
         </>
       ) : category === "source-control" ? (
         <>
+          {modelRow("pullRequestReviewModelSelection", {
+            ...searchableSetting("pull-request-review-model"),
+            description:
+              "Model for review threads started from the pull request list. When unset, review threads use the default thread model.",
+            resetLabel: "review thread model",
+          })}
+          <SettingsRow
+            serverScoped
+            settingKeys={["pullRequestReviewBrief"]}
+            mixed={mixedReviewBrief}
+            {...searchableSetting("pull-request-review-brief")}
+            description={`First message of a review thread started from the pull request list. ${PULL_REQUEST_REVIEW_BRIEF_URL_PLACEHOLDER} becomes the pull request's URL.`}
+            resetAction={
+              mixedReviewBrief ||
+              settings.pullRequestReviewBrief !== DEFAULT_SERVER_SETTINGS.pullRequestReviewBrief ? (
+                <SettingResetButton
+                  label="review brief"
+                  onClick={() =>
+                    updateSettings({
+                      pullRequestReviewBrief: DEFAULT_SERVER_SETTINGS.pullRequestReviewBrief,
+                    })
+                  }
+                />
+              ) : null
+            }
+          >
+            <div className="mt-3 max-w-2xl pb-3.5">
+              <Textarea
+                key={`${targets.map((candidate) => `${candidate.environmentId}:${candidate.projectId}`).join(",")}:${mixedReviewBrief}:${settings.pullRequestReviewBrief}`}
+                aria-label="Review thread brief"
+                rows={8}
+                defaultValue={mixedReviewBrief ? "" : settings.pullRequestReviewBrief}
+                placeholder={
+                  mixedReviewBrief ? "Mixed. Enter a brief to apply to all selected targets." : ""
+                }
+                onChange={() => {
+                  reviewBriefEdited.current = true;
+                }}
+                onBlur={(event) => {
+                  const value = event.target.value.trim();
+                  if (
+                    reviewBriefEdited.current &&
+                    (mixedReviewBrief || value !== settings.pullRequestReviewBrief)
+                  )
+                    updateSettings({ pullRequestReviewBrief: value });
+                  reviewBriefEdited.current = false;
+                }}
+              />
+            </div>
+          </SettingsRow>
           <SettingsRow
             serverScoped
             settingKeys={["pullRequestRepository"]}

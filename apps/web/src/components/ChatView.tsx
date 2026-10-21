@@ -465,6 +465,7 @@ import { useRemoteOpenState } from "~/remoteOpen";
 import { shouldShowOpenInPicker } from "./chat/OpenInPicker.logic";
 import { useOpenFavoriteEditorShortcut } from "./chat/OpenInPickerShortcut";
 import { subscribeHelixReview } from "./chat/helixReview";
+import { findProjectForChangeRequest } from "~/lib/openPullRequestLink";
 import {
   PanelLayoutControls,
   type PanelLayoutControlsProps,
@@ -2290,10 +2291,6 @@ export default function ChatView(props: ChatViewProps) {
     activeThreadRef?.environmentId ?? null,
   );
   const browserAvailable = isPreviewSupportedInRuntime() || activeEnvironmentServerBrowser;
-  const previewPanelInlineSize = usePreviewPanelInlineSize(undefined, {
-    container: workspaceLayoutElement,
-    widthStorageKey: `t3code:preview-panel-width:${activeThreadKey}`,
-  });
   const activeThreadShell = useThreadShell(isServerThread ? activeThreadRef : null);
   const timelineThreadError =
     serverRuntime?.status === "failed" &&
@@ -2387,6 +2384,12 @@ export default function ChatView(props: ChatViewProps) {
     );
   const previewPanelOpen = activeRightPanelKind === "preview" && browserAvailable;
   const rightPanelOpen = rightPanelState.isOpen;
+  const previewPanelInlineSize = usePreviewPanelInlineSize(undefined, {
+    container: workspaceLayoutElement,
+    widthStorageKey: `t3code:preview-panel-width:${activeThreadKey}`,
+    defaultWidth: "half",
+    open: rightPanelOpen,
+  });
   const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
     usePanelAnimationSettings();
   const activeTerminalDrawerPresence = usePanelPresence(
@@ -10540,6 +10543,32 @@ export default function ChatView(props: ChatViewProps) {
     return <NoActiveThreadState />;
   }
 
+  // A thread with one pull request shows it directly; the list only helps choose between several.
+  const singlePullRequest =
+    renderedRightPanelSurface?.kind === "pull-requests" &&
+    supportsPullRequests &&
+    visiblePullRequestCount === 1
+      ? visiblePullRequests[0]!
+      : null;
+  const pullRequestPanelSurface = singlePullRequest
+    ? pullRequestSurface({
+        projectId:
+          findProjectForChangeRequest(
+            allProjects
+              .filter((project) => project.environmentId === activeThread.environmentId)
+              .toSorted(
+                (left, right) =>
+                  Number(right.id === activeThread.projectId) -
+                  Number(left.id === activeThread.projectId),
+              ),
+            singlePullRequest,
+          )?.id ?? activeThread.projectId,
+        host: singlePullRequest.host,
+        repository: singlePullRequest.repository,
+        number: singlePullRequest.number,
+        url: singlePullRequest.url,
+      })
+    : renderedRightPanelSurface;
   const rightPanelContent = activeThreadRef ? (
     renderedRightPanelSurface?.kind === "preview" ? (
       <Suspense fallback={null}>
@@ -10582,20 +10611,20 @@ export default function ChatView(props: ChatViewProps) {
           workspaceMutationId={workspaceMutationId}
         />
       </Suspense>
-    ) : renderedRightPanelSurface?.kind === "pull-request" && !pullRequestsCapabilityKnown ? (
+    ) : pullRequestPanelSurface?.kind === "pull-request" && !pullRequestsCapabilityKnown ? (
       <PullRequestDetailGhost />
-    ) : renderedRightPanelSurface?.kind === "pull-request" && !supportsPullRequests ? (
+    ) : pullRequestPanelSurface?.kind === "pull-request" && !supportsPullRequests ? (
       <PullRequestsUnavailableState
         title="Pull requests unavailable"
         error="Update this environment's T3 Code server to browse pull requests."
       />
-    ) : renderedRightPanelSurface?.kind === "pull-request" ? (
+    ) : pullRequestPanelSurface?.kind === "pull-request" ? (
       <PullRequestDetailPanel
         getShortcutContext={getShortcutContextStable}
         shortcutsEnabled={
-          rightPanelOpen && activeRightPanelSurface?.id === renderedRightPanelSurface.id
+          rightPanelOpen && activeRightPanelSurface?.id === renderedRightPanelSurface?.id
         }
-        key={`${renderedRightPanelSurface.host ?? ""}:${renderedRightPanelSurface.repository}#${renderedRightPanelSurface.number}`}
+        key={`${pullRequestPanelSurface.host ?? ""}:${pullRequestPanelSurface.repository}#${pullRequestPanelSurface.number}`}
         environmentId={activeThread.environmentId}
         onSelectPullRequest={(reference) => {
           if (activeThreadRef)
@@ -10608,10 +10637,10 @@ export default function ChatView(props: ChatViewProps) {
         }}
         threadRef={activeThreadRef}
         reference={{
-          projectId: renderedRightPanelSurface.projectId as ProjectId,
-          ...(renderedRightPanelSurface.host ? { host: renderedRightPanelSurface.host } : {}),
-          repository: renderedRightPanelSurface.repository,
-          number: renderedRightPanelSurface.number,
+          projectId: pullRequestPanelSurface.projectId as ProjectId,
+          ...(pullRequestPanelSurface.host ? { host: pullRequestPanelSurface.host } : {}),
+          repository: pullRequestPanelSurface.repository,
+          number: pullRequestPanelSurface.number,
         }}
         context={pullRequestPanelContext(
           {
@@ -10621,7 +10650,7 @@ export default function ChatView(props: ChatViewProps) {
             branchPullRequest:
               activeThreadShell?.branchPullRequest ?? activeThread.branchPullRequest,
           },
-          renderedRightPanelSurface,
+          pullRequestPanelSurface,
         )}
         composerDraftTarget={composerDraftTarget}
         onBack={

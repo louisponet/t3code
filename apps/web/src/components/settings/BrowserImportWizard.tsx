@@ -41,7 +41,6 @@ export type { WizardTarget } from "./browserImportWizard.logic";
 
 interface BrowserImportWizardProps {
   readonly source: BrowserImportSource;
-  readonly destinationEnvironmentName: string;
   readonly targetProfiles: ReadonlyArray<WizardTargetProfile>;
   readonly canCreateProfile: boolean;
   readonly onImport: (input: {
@@ -56,7 +55,6 @@ interface BrowserImportWizardProps {
 
 export function BrowserImportWizard({
   source: initialSource,
-  destinationEnvironmentName,
   targetProfiles,
   canCreateProfile,
   onImport,
@@ -145,11 +143,7 @@ export function BrowserImportWizard({
         ) : step.step === "checking" ? (
           <CheckingStep sourceName={source.name} check={step.check} />
         ) : step.step === "done" ? (
-          <DoneStep
-            {...step}
-            destinationEnvironmentName={destinationEnvironmentName}
-            onClose={onClose}
-          />
+          <DoneStep {...step} onClose={onClose} />
         ) : step.step === "blocked" ? (
           <BlockedStep
             source={source}
@@ -160,7 +154,6 @@ export function BrowserImportWizard({
         ) : (
           <ConfigureStep
             source={source}
-            destinationEnvironmentName={destinationEnvironmentName}
             targetProfiles={targetProfiles}
             canCreateProfile={canCreateProfile}
             sourceProfileDirectory={sourceProfileDirectory}
@@ -219,7 +212,6 @@ function cookieResultCount(count: number): string {
 
 type ConfigureStepProps = {
   readonly source: BrowserImportSource;
-  readonly destinationEnvironmentName: string;
   readonly targetProfiles: ReadonlyArray<WizardTargetProfile>;
   readonly canCreateProfile: boolean;
   readonly sourceProfileDirectory: string;
@@ -319,7 +311,6 @@ function FullDiskAccessStep({
 }
 function ConfigureStep({
   source,
-  destinationEnvironmentName,
   targetProfiles,
   canCreateProfile,
   sourceProfileDirectory,
@@ -345,9 +336,7 @@ function ConfigureStep({
     <>
       <DialogHeader>
         <DialogTitle>Import from {source.name}</DialogTitle>
-        <DialogDescription>
-          Choose which cookies to import for {destinationEnvironmentName}.
-        </DialogDescription>
+        <DialogDescription>Choose which cookies to import.</DialogDescription>
       </DialogHeader>
       <DialogPanel>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
@@ -507,14 +496,12 @@ function DoneStep({
   skipped,
   skippedDomains,
   targetName,
-  destinationEnvironmentName,
   onClose,
 }: {
   readonly imported: number;
   readonly skipped: number;
   readonly skippedDomains: ReadonlyArray<string>;
   readonly targetName: string;
-  readonly destinationEnvironmentName: string;
   readonly onClose: () => void;
 }) {
   return (
@@ -529,10 +516,10 @@ function DoneStep({
         </DialogTitle>
         <DialogDescription>
           {imported > 0
-            ? `Added to ${targetName} for ${destinationEnvironmentName}.${skipped > 0 ? ` ${cookieResultCount(skipped)} skipped.` : ""}`
+            ? `Added to ${targetName}.${skipped > 0 ? ` ${cookieResultCount(skipped)} skipped.` : ""}`
             : skipped > 0
-              ? `No cookies were imported for ${destinationEnvironmentName}.`
-              : `There were no cookies to import for ${destinationEnvironmentName}.`}
+              ? "No cookies were imported."
+              : "There were no cookies to import."}
         </DialogDescription>
       </DialogHeader>
       {skippedDomains.length > 0 ? (

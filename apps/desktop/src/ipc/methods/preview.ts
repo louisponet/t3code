@@ -24,6 +24,7 @@ import {
   PreviewForwardedShortcut,
   MAX_KEYBINDINGS_COUNT,
 } from "@t3tools/contracts";
+import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Option from "effect/Option";
@@ -335,21 +336,17 @@ export const importBrowserCookies = DesktopIpc.makeIpcMethod({
   payload: DesktopPreviewImportCookiesInputSchema,
   result: BrowserImportResult,
   handler: Effect.fn("desktop.ipc.preview.importBrowserCookies")(function* ({
-    environmentId,
+    environmentIds,
     ...importInput
   }) {
     const browserImport = yield* BrowserImport.BrowserImport;
     // Derived in main from the same helper the webview config uses, so cookies
     // land in exactly the partition the profile's tabs attach to.
-    const { scope, persistent, namespace } = resolvePartitionScope(
-      environmentId,
-      importInput.targetProfileId,
-    );
     return yield* browserImport.importCookies({
       input: importInput,
-      scope,
-      persistent,
-      ...(namespace === undefined ? {} : { namespace }),
+      targets: Arr.map(environmentIds, (environmentId) =>
+        resolvePartitionScope(environmentId, importInput.targetProfileId),
+      ),
     });
   }),
 });

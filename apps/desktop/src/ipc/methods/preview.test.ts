@@ -92,24 +92,27 @@ describe("preview IPC methods", () => {
           return { imported: 0, skipped: 0, skippedDomains: [] };
         }),
     });
-    const request = (environmentId: string, targetProfileId: string) =>
+    const request = (environmentIds: readonly [string, ...string[]], targetProfileId: string) =>
       PreviewIpc.importBrowserCookies.handler({
-        environmentId,
+        environmentIds,
         sourceId: "helium",
         sourceProfileDirectory: "Default",
         targetProfileId,
       });
 
     return Effect.gen(function* () {
-      yield* request("a", "b");
-      yield* request("a::b", DEFAULT_BROWSER_PROFILE_ID);
+      yield* request(["a", "c"], "b");
+      yield* request(["a::b"], DEFAULT_BROWSER_PROFILE_ID);
 
-      expect(received[0]).toMatchObject(PreviewIpc.resolvePartitionScope("a", "b"));
-      expect(received[1]).toMatchObject(
+      expect(received[0]?.targets).toEqual([
+        PreviewIpc.resolvePartitionScope("a", "b"),
+        PreviewIpc.resolvePartitionScope("c", "b"),
+      ]);
+      expect(received[1]?.targets).toEqual([
         PreviewIpc.resolvePartitionScope("a::b", DEFAULT_BROWSER_PROFILE_ID),
-      );
-      expect(received[0]?.namespace).toBe("profile");
-      expect(received[1]?.namespace).toBeUndefined();
+      ]);
+      expect(received[0]?.targets[0].namespace).toBe("profile");
+      expect(received[1]?.targets[0].namespace).toBeUndefined();
     }).pipe(Effect.provideService(BrowserImport.BrowserImport, browserImport));
   });
 

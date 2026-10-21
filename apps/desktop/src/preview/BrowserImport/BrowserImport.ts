@@ -5,6 +5,7 @@ import type {
   BrowserImportUnavailableReason,
 } from "@t3tools/contracts";
 import { BrowserImportFailureReason } from "@t3tools/contracts";
+import type * as Arr from "effect/Array";
 import * as Context from "effect/Context";
 import type { Session } from "electron";
 import * as Effect from "effect/Effect";
@@ -61,15 +62,20 @@ export class BrowserCookieWriteError extends Schema.TaggedError<BrowserCookieWri
   }
 }
 
+/** One browser session partition: a profile in one environment. */
+export interface BrowserImportTarget {
+  readonly scope: string;
+  readonly persistent: boolean;
+  readonly namespace?: BrowserSession.BrowserSessionPartitionNamespace;
+}
+
 export class BrowserImport extends Context.Service<
   BrowserImport,
   {
     readonly listSources: Effect.Effect<ReadonlyArray<BrowserImportSource>>;
     readonly importCookies: (input: {
       readonly input: BrowserImportInput;
-      readonly scope: string;
-      readonly persistent: boolean;
-      readonly namespace?: BrowserSession.BrowserSessionPartitionNamespace;
+      readonly targets: Arr.NonEmptyReadonlyArray<BrowserImportTarget>;
     }) => Effect.Effect<BrowserImportResult, BrowserImportFailedError>;
   }
 >()("@t3tools/desktop/preview/BrowserImport/BrowserImport") {}
@@ -178,9 +184,7 @@ export const make = Effect.gen(function* BrowserImportMake() {
 
   const importCookies = Effect.fn("BrowserImport.importCookies")(function* (input: {
     readonly input: BrowserImportInput;
-    readonly scope: string;
-    readonly persistent: boolean;
-    readonly namespace?: BrowserSession.BrowserSessionPartitionNamespace;
+    readonly targets: Arr.NonEmptyReadonlyArray<BrowserImportTarget>;
   }) {
     const definition = BROWSER_IMPORT_SOURCES.find(
       (candidate) => candidate.id === input.input.sourceId,
@@ -283,9 +287,8 @@ export const make = Effect.gen(function* BrowserImportMake() {
       }),
     );
 
-    const session = yield* browserSession
-      .getSession(input.scope, input.persistent, input.namespace)
-      .pipe(
+    const writeTo = (target: BrowserImportTarget) =>
+      browserSession.getSession(target.scope, target.persistent, target.namespace).pipe(
         Effect.mapError(
           (cause) =>
             new BrowserImportFailedError({
@@ -294,11 +297,17 @@ export const make = Effect.gen(function* BrowserImportMake() {
               cause,
             }),
         ),
+        // Cookies are written one at a time: Chromium's cookie store serialises
+        // writes anyway, and a rejected cookie should only cost itself.
+        Effect.flatMap((session) => writeCookies(session, result)),
       );
 
-    // Written one at a time rather than in parallel: Chromium's cookie store
-    // serialises writes anyway, and a rejected cookie should only cost itself.
-    return yield* writeCookies(session, result);
+    // Read once and written into every target, so the keychain is not asked
+    // again per environment. Each target is its own cookie store, so they are
+    // written concurrently. The least complete target is what the user can
+    // rely on everywhere.
+    const written = yield* Effect.forEach(input.targets, writeTo, { concurrency: "unbounded" });
+    return written.reduce((least, next) => (next.imported < least.imported ? next : least));
   });
 
   return BrowserImport.of({ listSources, importCookies });

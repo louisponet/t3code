@@ -33,14 +33,14 @@ import {
 } from "@t3tools/contracts";
 import { PREVIEW_VIEWPORT_PRESETS } from "@t3tools/shared/previewViewport";
 import { MoreVertical, Plus as PlusIcon } from "lucide-react";
+import * as Arr from "effect/Array";
 import { useCallback, useRef, useState } from "react";
 
 import { ScreenRotationIcon } from "~/browser/ScreenRotationIcon";
 import { AnimatedHeight } from "~/components/AnimatedHeight";
-import { resolveEnvironmentOptionLabel } from "~/components/BranchToolbar.logic";
 import { previewBridge } from "~/components/preview/previewBridge";
 import { cn, randomUUID } from "~/lib/utils";
-import { useEnvironments, usePrimaryEnvironment } from "~/state/environments";
+import { useEnvironments } from "~/state/environments";
 import { deviceEnvironment, useDeviceState } from "~/state/device";
 import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
 import { useAtomCommand } from "~/state/use-atom-command";
@@ -936,13 +936,8 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
   const settingsHydrated = useClientSettingsHydrated();
   const updateSettings = useUpdatePrimarySettings();
   const { environments, isReady: environmentsReady } = useEnvironments();
-  const primaryEnvironment = usePrimaryEnvironment();
   const [sources, setSources] = useState<ReadonlyArray<BrowserImportSource> | null>(null);
-  const [importSession, setImportSession] = useState<{
-    readonly source: BrowserImportSource;
-    readonly environmentId: EnvironmentId;
-    readonly environmentName: string;
-  } | null>(null);
+  const [importSource, setImportSource] = useState<BrowserImportSource | null>(null);
   const [profilePendingRemoval, setProfilePendingRemoval] = useState<BrowserProfile | null>(null);
   const [profilePendingClear, setProfilePendingClear] = useState<BrowserProfile | null>(null);
   const [profileRemovalError, setProfileRemovalError] = useState<string | null>(null);
@@ -1075,10 +1070,14 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
 
   const runWizardImport = async (
     source: BrowserImportSource,
-    environmentId: EnvironmentId,
     input: { readonly sourceProfileDirectory: string; readonly target: WizardTarget },
   ): Promise<ImportOutcome> => {
-    if (!previewBridge) return { kind: "blocked", reason: "sessionUnavailable" };
+    // Profiles are per device but their cookies live per environment, so the
+    // import goes everywhere a tab in this profile can open, as clearing does.
+    const environmentIds = environments.map((environment) => environment.environmentId);
+    if (!previewBridge || !Arr.isReadonlyArrayNonEmpty(environmentIds)) {
+      return { kind: "blocked", reason: "sessionUnavailable" };
+    }
     if (!settingsHydrated) return { kind: "blocked", reason: "sessionUnavailable" };
     if (
       input.target.kind === "existing" &&
@@ -1091,9 +1090,10 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
     if (importInFlightRef.current) return { kind: "blocked", reason: "readFailed" };
     importInFlightRef.current = true;
     setImportInFlight(true);
+    let newProfileSaved = false;
     try {
       const result = await previewBridge.importBrowserCookies({
-        environmentId,
+        environmentIds,
         sourceId: source.id,
         sourceProfileDirectory: input.sourceProfileDirectory,
         targetProfileId: input.target.profileId,
@@ -1134,18 +1134,11 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                 ],
               };
             });
+            newProfileSaved = true;
             targetName =
               persisted.browserProfiles.find((profile) => profile.id === input.target.profileId)
                 ?.name ?? source.name;
           } catch (cause) {
-            // This target id belongs only to the attempted new profile. Clear
-            // its partition so a failed registration cannot strand imported
-            // cookies behind a profile that disappears on restart.
-            await clearBrowserProfileData(
-              previewBridge,
-              [environmentId],
-              input.target.profileId,
-            ).catch(() => undefined);
             const reason =
               cause instanceof ProfileLimitReachedError ? "profileLimitReached" : "profileNotSaved";
             throw new Error(`Importing cookies from ${source.id} failed: ${reason}.`, { cause });
@@ -1166,6 +1159,14 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
     } catch (cause) {
       return { kind: "blocked", reason: importFailureReason(cause) };
     } finally {
+      // This target id belongs only to the attempted new profile. Some
+      // environments may hold its cookies even when the import reports none or
+      // fails partway, so clear them all unless the profile was saved.
+      if (input.target.kind === "new" && !newProfileSaved) {
+        await clearBrowserProfileData(previewBridge, environmentIds, input.target.profileId).catch(
+          () => undefined,
+        );
+      }
       importInFlightRef.current = false;
       setImportInFlight(false);
     }
@@ -1226,24 +1227,16 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                   {importableSources.map((source) => (
                     <MenuItem
                       key={source.id}
-                      disabled={!settingsHydrated || primaryEnvironment == null}
+                      disabled={!settingsHydrated || environments.length === 0}
                       onClick={() => {
-                        if (!settingsHydrated || primaryEnvironment == null) return;
-                        setImportSession({
-                          source,
-                          environmentId: primaryEnvironment.environmentId,
-                          environmentName: resolveEnvironmentOptionLabel({
-                            isPrimary: true,
-                            environmentId: primaryEnvironment.environmentId,
-                            runtimeLabel: primaryEnvironment.label,
-                          }),
-                        });
+                        if (!settingsHydrated || environments.length === 0) return;
+                        setImportSource(source);
                       }}
                     >
                       {source.name}
                     </MenuItem>
                   ))}
-                  {primaryEnvironment == null ? (
+                  {environments.length === 0 ? (
                     <MenuItem disabled>Connect to an environment to import cookies</MenuItem>
                   ) : null}
                 </>
@@ -1432,16 +1425,13 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
           </AlertDialogFooter>
         </AlertDialogPopup>
       </AlertDialog>
-      {importSession ? (
+      {importSource ? (
         <BrowserImportWizard
-          source={importSession.source}
-          destinationEnvironmentName={importSession.environmentName}
+          source={importSource}
           targetProfiles={listedProfiles.map((profile) => ({ id: profile.id, name: profile.name }))}
           canCreateProfile={settingsHydrated && !atProfileLimit}
-          onImport={(input) =>
-            runWizardImport(importSession.source, importSession.environmentId, input)
-          }
-          onRefreshSource={() => refreshImportSource(importSession.source.id)}
+          onImport={(input) => runWizardImport(importSource, input)}
+          onRefreshSource={() => refreshImportSource(importSource.id)}
           onCheckFullDiskAccess={
             window.desktopBridge?.checkSystemPermission
               ? () => window.desktopBridge!.checkSystemPermission!("full-disk-access")
@@ -1458,7 +1448,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                 });
               });
           }}
-          onClose={() => setImportSession(null)}
+          onClose={() => setImportSource(null)}
         />
       ) : null}
     </SettingsRow>

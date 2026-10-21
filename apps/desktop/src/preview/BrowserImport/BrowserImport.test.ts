@@ -1,3 +1,5 @@
+// @effect-diagnostics nodeBuiltinImport:off - Builds a Firefox-shaped `cookies.sqlite`
+// fixture with the same native bindings Firefox itself uses.
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -6,6 +8,8 @@ import * as FileSystem from "effect/FileSystem";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
+import type { Session } from "electron";
+import * as NodeSqlite from "node:sqlite";
 
 import * as BrowserSession from "../BrowserSession.ts";
 import * as BrowserImport from "./BrowserImport.ts";
@@ -82,8 +86,7 @@ describe("BrowserImport.importCookies", () => {
             sourceProfileDirectory: "../../../../secrets",
             targetProfileId: "default",
           },
-          scope: "persist:t3code-preview-test",
-          persistent: true,
+          targets: [{ scope: "persist:t3code-preview-test", persistent: true }],
         })
         .pipe(Effect.flip);
 
@@ -109,13 +112,108 @@ describe("BrowserImport.importCookies", () => {
               sourceProfileDirectory: "Default",
               targetProfileId: "default",
             },
-            scope: "persist:t3code-preview-test",
-            persistent: true,
+            targets: [{ scope: "persist:t3code-preview-test", persistent: true }],
           })
           .pipe(Effect.flip);
 
         assert.equal(error.reason, "browserRunning");
       }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
+});
+
+describe("BrowserImport.importCookies targets", () => {
+  it.effect("writes the source's cookies into every target", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3code-import-" });
+      const root = `${home}/.mozilla/firefox`;
+      yield* fileSystem.makeDirectory(`${root}/work.default`, { recursive: true });
+      yield* fileSystem.writeFileString(
+        `${root}/profiles.ini`,
+        "[Profile0]\nName=Work\nIsRelative=1\nPath=work.default\n",
+      );
+      const database = new NodeSqlite.DatabaseSync(`${root}/work.default/cookies.sqlite`);
+      database.exec("pragma user_version = 15");
+      database.exec(
+        `create table moz_cookies (
+           id integer primary key, host text, name text, value text, path text,
+           expiry integer, isSecure integer, isHttpOnly integer, sameSite integer,
+           originAttributes text not null default ''
+         )`,
+      );
+      database.exec(
+        `insert into moz_cookies (host, name, value, path, expiry, isSecure, isHttpOnly, sameSite)
+         values ('.grafana.example', 'session', 'value', '/', 4102444800, 1, 1, 1)`,
+      );
+      database.close();
+
+      const written = new Map<string, Array<string>>();
+      const sessionFor = (scope = "shared") =>
+        ({
+          cookies: {
+            set: (details: { readonly url: string }) => {
+              if (scope === "rejects") return Promise.reject(new Error("fixture rejection"));
+              written.set(scope, [...(written.get(scope) ?? []), details.url]);
+              return Promise.resolve();
+            },
+            flushStore: () => Promise.resolve(),
+          },
+        }) as unknown as Session;
+      const layerSessions = Layer.succeed(
+        BrowserSession.BrowserSession,
+        BrowserSession.BrowserSession.of({
+          getPartition: () => Effect.die("getPartition must not be reached"),
+          isPartition: () => false,
+          getSession: (scope) => Effect.succeed(sessionFor(scope)),
+          clearCookies: () => Effect.die("clearCookies must not be reached"),
+          clearCache: () => Effect.die("clearCache must not be reached"),
+        }),
+      );
+      const importer = yield* BrowserImport.BrowserImport.pipe(
+        Effect.provide(
+          BrowserImport.layer.pipe(
+            Layer.provide(layerSessions),
+            Layer.provide(Layer.succeed(HostProcess.Environment, { HOME: home })),
+            Layer.provide(Layer.succeed(HostProcess.Platform, "linux")),
+            Layer.provide(Layer.succeed(HostProcess.ExecutablePath, "/opt/t3code/t3code")),
+            Layer.provide(NodeServices.layer),
+          ),
+        ),
+      );
+      const input = {
+        sourceId: "firefox",
+        sourceProfileDirectory: "work.default",
+        targetProfileId: "default",
+      } as const;
+
+      const result = yield* importer.importCookies({
+        input,
+        targets: [
+          { scope: "environment-a", persistent: true },
+          { scope: "environment-b", persistent: true },
+        ],
+      });
+
+      assert.deepEqual(result, { imported: 1, skipped: 0, skippedDomains: [] });
+      assert.deepEqual(Object.fromEntries(written), {
+        "environment-a": ["https://grafana.example/"],
+        "environment-b": ["https://grafana.example/"],
+      });
+
+      // A target that loses cookies is what the user is told about.
+      const partial = yield* importer.importCookies({
+        input,
+        targets: [
+          { scope: "environment-a", persistent: true },
+          { scope: "rejects", persistent: true },
+        ],
+      });
+      assert.deepEqual(partial, {
+        imported: 0,
+        skipped: 1,
+        skippedDomains: ["grafana.example"],
+      });
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
   );
 });
 

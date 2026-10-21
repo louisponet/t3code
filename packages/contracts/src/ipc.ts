@@ -1171,7 +1171,7 @@ export interface DesktopPreviewBridge {
   ) => Promise<DesktopPreviewWebviewConfig>;
   listBrowserImportSources: () => Promise<ReadonlyArray<BrowserImportSource>>;
   importBrowserCookies: (input: {
-    readonly environmentId: EnvironmentId;
+    readonly environmentIds: readonly [EnvironmentId, ...EnvironmentId[]];
     readonly sourceId: BrowserImportSourceId;
     readonly sourceProfileDirectory: string;
     readonly targetProfileId: string;

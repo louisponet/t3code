@@ -8,7 +8,9 @@ Open **Settings → Integrations → Browser profiles → Add profile**, then ch
 unlock prompt if one appears.
 
 This is a one-time copy. Later login changes stay separate between the two browsers, and some
-sites may still require you to sign in again.
+sites may still require you to sign in again. The cookies stay on this computer, and the desktop
+app uses them for every environment you have added, including browser tools it opens for them.
+Import again after adding an environment.
 
 On macOS, Safari imports need Full Disk Access. Choose **Allow**, drag T3 Code into the
 System Settings permission list, and turn access on. **Continue** becomes available when access

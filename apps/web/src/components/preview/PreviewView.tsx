@@ -16,6 +16,7 @@ import {
   DEFAULT_PREVIEW_ZOOM_FACTOR,
   PREVIEW_ZOOM_LEVELS,
   type PreviewAdjustInput,
+  type DesktopPreviewPasswordFillResult,
 } from "@t3tools/contracts";
 import { normalizePreviewUrl, resolveAddressBarInput } from "@t3tools/shared/preview";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -105,6 +106,18 @@ interface Props {
   /** False for tabs that must stay in the environment's browser, such as a tool's. */
   allowRuntimeMove?: boolean;
 }
+
+const ONE_PASSWORD_FILL_MESSAGES: Record<DesktopPreviewPasswordFillResult, string | null> = {
+  filled: null,
+  cancelled: null,
+  "no-match": "No 1Password login is saved for this site.",
+  "no-fields": "No sign-in fields found on this page.",
+  "insecure-page": "1Password fills only HTTPS pages and localhost.",
+  "not-installed": "Install the 1Password CLI (op) to fill from 1Password.",
+  locked:
+    "The 1Password CLI is locked or not set up. Unlock 1Password and turn on Settings > Developer > Integrate with 1Password CLI.",
+  failed: "The 1Password CLI could not read the login.",
+};
 
 function previewProfileName(
   profiles: ReadonlyArray<{ readonly id: string; readonly name: string }>,
@@ -479,6 +492,16 @@ export function PreviewView({
     useRightPanelStore.getState().close(threadRef);
   }, [miniPlayerTabId, tabId, threadRef]);
 
+  const handleFillFromOnePassword = () => {
+    if (!previewBridge || !runtimeTabId) return;
+    void previewBridge.fillFromOnePassword(runtimeTabId).then(
+      (result) => {
+        const description = ONE_PASSWORD_FILL_MESSAGES[result];
+        if (description) toastManager.add({ type: "error", title: "1Password", description });
+      },
+      () => undefined,
+    );
+  };
   const desktopCall = (op: ((tabId: string) => Promise<void>) | undefined) => () => {
     if (op && runtimeTabId) void op(runtimeTabId).catch(() => undefined);
   };
@@ -517,6 +540,7 @@ export function PreviewView({
               ?.clearCache(threadRef.environmentId, activeProfileId)
               .catch(() => undefined),
           openDevTools: desktopCall(previewBridge.openDevTools),
+          fillFromOnePassword: handleFillFromOnePassword,
           toggleNativePictureInPicture: () => handleNativePictureInPicture(),
         }
       : null;

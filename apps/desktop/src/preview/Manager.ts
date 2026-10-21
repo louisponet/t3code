@@ -15,6 +15,7 @@ import type {
   DesktopPreviewColorScheme,
   DesktopPreviewFavicon,
   DesktopPreviewOpenLinkEvent,
+  DesktopPreviewPasswordFillResult,
   DesktopPreviewPointerEvent,
   PreviewAnnotationPayload,
   PreviewAnnotationRect,
@@ -65,6 +66,7 @@ import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopRendererHistory from "../telemetry/DesktopRendererHistory.ts";
 import { MENU_ACTION_CHANNEL, PREVIEW_PICTURE_IN_PICTURE_FRAME_CHANNEL } from "../ipc/channels.ts";
 import * as DesktopBrowserHost from "./DesktopBrowserHost.ts";
+import * as PreviewOnePassword from "./OnePassword.ts";
 import * as PreviewPasskeys from "./Passkeys.ts";
 import * as BrowserSession from "./BrowserSession.ts";
 import {
@@ -542,6 +544,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   const parentScope = yield* Scope.Scope;
   const browserHost = yield* DesktopBrowserHost.DesktopBrowserHost;
   const passkeys = yield* PreviewPasskeys.PreviewPasskeys;
+  const onePassword = yield* PreviewOnePassword.PreviewOnePassword;
   const context = yield* Effect.context<never>();
   const runFork = Effect.runForkWith(context);
   const resolvedArtifactDirectory = path.resolve(artifactDirectory);
@@ -2086,6 +2089,12 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     });
   });
 
+  const fillFromOnePassword = Effect.fn("PreviewManager.fillFromOnePassword")(function* (
+    tabId: string,
+  ) {
+    return yield* onePassword.fill(yield* requireWebContents(tabId));
+  });
+
   const setAnnotationTheme = Effect.fn("PreviewManager.setAnnotationTheme")(function* (
     theme: DesktopPreviewAnnotationTheme,
   ) {
@@ -3322,6 +3331,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     navigate,
     openPictureInPicture,
     openDevTools,
+    fillFromOnePassword,
     pickElement,
     prepareWebview,
     reapplyZoom,
@@ -3543,6 +3553,10 @@ export class PreviewManager extends Context.Service<
       audioMuted: boolean,
     ) => Effect.Effect<void, PreviewManagerError>;
     readonly openDevTools: (tabId: string) => Effect.Effect<void, PreviewManagerError>;
+    /** Human-triggered only; never reachable from agents or preview automation. */
+    readonly fillFromOnePassword: (
+      tabId: string,
+    ) => Effect.Effect<DesktopPreviewPasswordFillResult, PreviewManagerError>;
     readonly clearCookies: (
       partitions?: ReadonlyArray<string>,
     ) => Effect.Effect<void, PreviewManagerError>;
@@ -3686,6 +3700,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
     setZoomFactor: operations.setZoomFactor,
     setAudioMuted: operations.setAudioMuted,
     openDevTools: operations.openDevTools,
+    fillFromOnePassword: operations.fillFromOnePassword,
     clearCookies: Effect.fn("PreviewManager.clearCookies")(function* (partitions) {
       yield* browserSession
         .clearCookies(partitions)

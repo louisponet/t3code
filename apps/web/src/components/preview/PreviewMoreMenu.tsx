@@ -38,6 +38,7 @@ export interface PreviewMoreMenuActions {
   readonly clearCookies: () => void;
   readonly clearCache: () => void;
   readonly openDevTools?: () => void;
+  readonly fillFromOnePassword?: () => void;
   readonly toggleNativePictureInPicture?: () => void;
 }
 
@@ -85,6 +86,11 @@ export function PreviewMoreMenu({
     <Menu>
       <MenuTriggerButton />
       <MenuPopup align="end" sideOffset={6}>
+        {actions.fillFromOnePassword ? (
+          <MenuItem onClick={actions.fillFromOnePassword} disabled={disabled}>
+            Fill from 1Password
+          </MenuItem>
+        ) : null}
         <MenuItem onClick={actions.hardReload} disabled={disabled}>
           Hard reload
         </MenuItem>

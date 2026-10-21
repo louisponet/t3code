@@ -112,6 +112,7 @@ const ONE_PASSWORD_FILL_MESSAGES: Record<DesktopPreviewPasswordFillResult, strin
   cancelled: null,
   "no-match": "No 1Password login is saved for this site.",
   "no-fields": "No sign-in fields found on this page.",
+  "missing-credentials": "That 1Password login has nothing saved for the fields on this page.",
   "insecure-page": "1Password fills only HTTPS pages and localhost.",
   "not-installed": "Install the 1Password CLI (op) to fill from 1Password.",
   locked:

@@ -194,7 +194,12 @@ const layerFor = (script: OpScript, calls: Array<ReadonlyArray<string>>) =>
       Layer.succeed(
         ChildProcessSpawner.ChildProcessSpawner,
         ChildProcessSpawner.make((command) => {
-          const { args } = command as unknown as { readonly args: ReadonlyArray<string> };
+          const { args, options } = command as unknown as {
+            readonly args: ReadonlyArray<string>;
+            readonly options: { readonly detached?: boolean };
+          };
+          // 1Password approves per session; a detached child asks on every call.
+          assert.strictEqual(options.detached, false);
           calls.push(args);
           if (args[1] === "list") {
             const list = script.list ?? { exitCode: 0, stdout: "[]" };
@@ -296,24 +301,44 @@ describe("PreviewOnePassword.fill", () => {
     );
   });
 
-  it.effect("asks once when several logins match, then reuses the choice", () => {
+  it.effect("asks each time several logins match, preselecting the last choice", () => {
     const calls: Array<ReadonlyArray<string>> = [];
     const list = JSON.stringify([
       { id: "a", title: "Work", urls: [{ href: "https://google.com" }] },
       { id: "b", title: "Personal", urls: [{ href: "https://google.com" }] },
     ]);
+    // Sorted by title: Personal, Work.
     electron.showMessageBox.mockResolvedValue({ response: 1 });
     const { guest } = fakeGuest("https://accounts.google.com", [field({ type: "email" })]);
+    const defaultIds = () =>
+      electron.showMessageBox.mock.calls.map(
+        (args: ReadonlyArray<unknown>) => (args.at(-1) as { defaultId: number }).defaultId,
+      );
     return Effect.gen(function* () {
       assert.strictEqual(yield* fill(guest), "filled");
       assert.strictEqual(yield* fill(guest), "filled");
-      assert.strictEqual(electron.showMessageBox.mock.calls.length, 1);
-      // Sorted by title: Personal, Work.
+      assert.deepStrictEqual(defaultIds(), [0, 1]);
       assert.deepStrictEqual(
         calls.filter((args) => args[1] === "get").map((args) => args[2]),
         ["a", "a"],
       );
     }).pipe(Effect.provide(layerFor({ list: { exitCode: 0, stdout: list }, item: ITEM }, calls)));
+  });
+
+  it.effect("says when the login has nothing for the page's fields", () => {
+    const { guest, inserted } = fakeGuest("https://accounts.google.com", [
+      field({ type: "password", autocomplete: "current-password" }),
+    ]);
+    const item = JSON.stringify({ fields: [{ purpose: "USERNAME", value: "ada@example.com" }] });
+    return fill(guest).pipe(
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          assert.strictEqual(result, "missing-credentials");
+          assert.deepStrictEqual(inserted, []);
+        }),
+      ),
+      Effect.provide(layerFor({ list: { exitCode: 0, stdout: LIST }, item }, [])),
+    );
   });
 
   it.effect("reports a locked CLI without reading any item", () => {

@@ -946,6 +946,7 @@ export const DesktopPreviewPasswordFillResultSchema = Schema.Literals([
   "cancelled",
   "no-match",
   "no-fields",
+  "missing-credentials",
   "insecure-page",
   "not-installed",
   "locked",

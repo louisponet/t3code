@@ -1,7 +1,6 @@
 import type { DesktopPreviewPasswordFillResult } from "@t3tools/contracts";
 import type { WebContents } from "electron";
 import { BrowserWindow, dialog } from "electron";
-import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -174,9 +173,6 @@ export class OnePasswordCliError extends Schema.TaggedError<OnePasswordCliError>
 const FILL_WORLD_ID = 1003;
 const FIELDS_KEY = "__t3codeOnePasswordFields";
 const OP_TIMEOUT = "2 minutes";
-// Multi-step sign-ins (Google asks for the email, password, and code on
-// separate pages) reuse the login picked a moment ago instead of asking again.
-const REMEMBERED_CHOICE_MS = 5 * 60 * 1000;
 
 /**
  * Runs in an isolated world, so the page cannot tamper with detection. The
@@ -218,6 +214,7 @@ const chooseLogin = async (
   guest: WebContents,
   origin: string,
   logins: ReadonlyArray<LoginSummary>,
+  defaultId: number,
 ) => {
   const options: Electron.MessageBoxOptions = {
     type: "none",
@@ -230,7 +227,7 @@ const chooseLogin = async (
       "Cancel",
     ],
     cancelId: logins.length,
-    defaultId: 0,
+    defaultId,
     noLink: true,
   };
   const parent = guest.hostWebContents
@@ -260,16 +257,22 @@ export class PreviewOnePassword extends Context.Service<
 const make = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const pending = new WeakSet<WebContents>();
-  const remembered = new WeakMap<
-    WebContents,
-    { readonly origin: string; readonly id: string; readonly at: number }
-  >();
+  // Multi-step sign-ins (Google asks for the email, password, and code on
+  // separate pages) preselect the login picked on the previous step.
+  const lastPicked = new Map<string, string>();
 
   const runOp = (args: ReadonlyArray<string>, onFailure: "locked" | "failed") =>
     Effect.scoped(
       Effect.gen(function* () {
         const handle = yield* spawner.spawn(
-          ChildProcess.make("op", args, { stdin: "ignore", stderr: "ignore", extendEnv: true }),
+          // 1Password approves `op` per session, so a detached (setsid) child
+          // would ask the person again on every call.
+          ChildProcess.make("op", args, {
+            stdin: "ignore",
+            stderr: "ignore",
+            extendEnv: true,
+            detached: false,
+          }),
         );
         const [stdout, exitCode] = yield* Effect.all(
           [handle.stdout.pipe(Stream.decodeText(), Stream.mkString), handle.exitCode],
@@ -324,19 +327,10 @@ const make = Effect.gen(function* () {
       Effect.map(credentialsFromItem),
     );
 
-  const pickLogin = (
-    guest: WebContents,
-    origin: string,
-    logins: ReadonlyArray<LoginSummary>,
-    now: number,
-  ) => {
-    const previous = remembered.get(guest);
-    const reuse =
-      previous && previous.origin === origin && now - previous.at < REMEMBERED_CHOICE_MS
-        ? logins.find((login) => login.id === previous.id)
-        : undefined;
-    if (reuse || logins.length === 1) return Effect.succeed(reuse ?? logins[0]);
-    return Effect.promise(() => chooseLogin(guest, origin, logins)).pipe(
+  const pickLogin = (guest: WebContents, origin: string, logins: ReadonlyArray<LoginSummary>) => {
+    if (logins.length === 1) return Effect.succeed(logins[0]);
+    const previous = logins.findIndex((login) => login.id === lastPicked.get(origin));
+    return Effect.promise(() => chooseLogin(guest, origin, logins, Math.max(previous, 0))).pipe(
       Effect.orElseSucceed(() => undefined),
     );
   };
@@ -358,7 +352,16 @@ const make = Effect.gen(function* () {
     if (fields === null) return "cancelled" as const;
     const available = new Set(FIELD_ORDER.filter((field) => credentials[field]));
     const plan = planFill(fields, available);
-    if (plan.length === 0) return "no-fields" as const;
+    yield* Effect.annotateCurrentSpan({
+      fields: fields.length,
+      available: [...available].join(","),
+      planned: plan.map((step) => step.field).join(","),
+    });
+    if (plan.length === 0) {
+      return planFill(fields, new Set(FIELD_ORDER)).length === 0
+        ? ("no-fields" as const)
+        : ("missing-credentials" as const);
+    }
     for (const step of plan) {
       const value = credentials[step.field];
       if (!value || !sameDocument(guest, origin)) return "cancelled" as const;
@@ -370,7 +373,8 @@ const make = Effect.gen(function* () {
       );
       // insertText is trusted input to the guest's own widget, so frameworks
       // that ignore synthetic events still see it, and it never reaches the app.
-      if (focused) yield* Effect.promise(() => guest.insertText(value));
+      if (!focused) return "cancelled" as const;
+      yield* Effect.promise(() => guest.insertText(value));
     }
     guest.focus();
     return "filled" as const;
@@ -389,12 +393,11 @@ const make = Effect.gen(function* () {
     return yield* Effect.gen(function* () {
       const logins = matchLogins(yield* listLogins, origin);
       if (logins.length === 0) return "no-match" as const;
-      const now = yield* Clock.currentTimeMillis;
-      const login = yield* pickLogin(guest, origin, logins, now);
+      const login = yield* pickLogin(guest, origin, logins);
       if (!login) return "cancelled" as const;
+      lastPicked.set(origin, login.id);
       const credentials = yield* getCredentials(login.id);
       if (!sameDocument(guest, origin)) return "cancelled" as const;
-      remembered.set(guest, { origin, id: login.id, at: now });
       return yield* Effect.acquireUseRelease(
         Effect.sync(holdAgentCommands),
         () => fillFields(guest, origin, credentials),
@@ -408,6 +411,7 @@ const make = Effect.gen(function* () {
         }).pipe(Effect.as(error.reason)),
       ),
       Effect.catchDefect(() => Effect.succeed("failed" as const)),
+      Effect.tap((result) => Effect.annotateCurrentSpan({ result })),
       Effect.ensuring(Effect.sync(() => pending.delete(guest))),
     );
   });

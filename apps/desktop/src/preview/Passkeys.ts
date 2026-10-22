@@ -102,7 +102,7 @@ const withDeadline = (ceremony: Promise<PasskeyCeremonyResult>, milliseconds: nu
 // Secure contexts only: https, or http on this machine. Chromium also trusts
 // `*.localhost`, but the macOS layer refuses it, so it is turned away here
 // instead of failing deeper with a less useful error.
-const isTrustworthyOrigin = (origin: string) => {
+export const isTrustworthyOrigin = (origin: string) => {
   if (!URL.canParse(origin)) return false;
   const { protocol, hostname } = new URL(origin);
   return (

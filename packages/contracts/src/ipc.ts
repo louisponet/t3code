@@ -942,6 +942,19 @@ export const DesktopPreviewTabInputSchema = Schema.Struct({
   tabId: DesktopPreviewTabIdSchema,
 });
 
+export const DesktopPreviewPasswordFillResultSchema = Schema.Literals([
+  "filled",
+  "cancelled",
+  "no-match",
+  "no-fields",
+  "missing-credentials",
+  "insecure-page",
+  "not-installed",
+  "locked",
+  "failed",
+]);
+export type DesktopPreviewPasswordFillResult = typeof DesktopPreviewPasswordFillResultSchema.Type;
+
 /**
  * Tab creation carries the client's configured browser defaults so the guest is
  * born already zoomed and color-scheme-emulated. Applying them after creation
@@ -1172,6 +1185,7 @@ export interface DesktopPreviewBridge {
   setColorScheme: (tabId: string, colorScheme: DesktopPreviewColorScheme) => Promise<void>;
   setAudioMuted: (tabId: string, audioMuted: boolean) => Promise<void>;
   openDevTools: (tabId: string) => Promise<void>;
+  fillFromOnePassword: (tabId: string) => Promise<DesktopPreviewPasswordFillResult>;
   clearCookies: (environmentId: EnvironmentId, profileId?: string) => Promise<void>;
   clearCache: (environmentId: EnvironmentId, profileId?: string) => Promise<void>;
   getPreviewConfig: (

@@ -4,6 +4,7 @@ import {
   DesktopPreviewArtifactInputSchema,
   DesktopPreviewConfigInputSchema,
   DesktopPreviewNavigateInputSchema,
+  DesktopPreviewPasswordFillResultSchema,
   DesktopPreviewRecordingArtifactSchema,
   DesktopPreviewRecordingSaveInputSchema,
   DesktopPreviewRegisterWebviewInputSchema,
@@ -201,6 +202,25 @@ export const openDevTools = tabMethod(
   "desktop.ipc.preview.openDevTools",
   (manager, tabId) => manager.openDevTools(tabId),
 );
+// Only a person at the app's own window can ask: guests and other renderers
+// must not be able to put secrets into a page.
+export const fillFromOnePassword = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_FILL_FROM_ONE_PASSWORD_CHANNEL,
+  payload: DesktopPreviewTabInputSchema,
+  result: DesktopPreviewPasswordFillResultSchema,
+  handler: Effect.fn("desktop.ipc.preview.fillFromOnePassword")(function* ({ tabId }, event) {
+    const main = yield* (yield* ElectronWindow.ElectronWindow).main;
+    if (
+      event === undefined ||
+      Option.isNone(main) ||
+      main.value.webContents.id !== event.sender.id
+    ) {
+      return "cancelled" as const;
+    }
+    const manager = yield* PreviewManager.PreviewManager;
+    return yield* manager.fillFromOnePassword(tabId);
+  }),
+});
 export const cancelPickElement = tabMethod(
   IpcChannels.PREVIEW_CANCEL_PICK_ELEMENT_CHANNEL,
   "desktop.ipc.preview.cancelPickElement",

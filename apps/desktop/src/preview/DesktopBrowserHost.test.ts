@@ -90,6 +90,39 @@ describe("DesktopBrowserHost", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect("queues the server's commands while held and replays them in order", () =>
+    Effect.gen(function* () {
+      const host = yield* DesktopBrowserHost.make;
+      const debuggee = makeDebuggee();
+      const sent: Array<string> = [];
+      const sendCommand = debuggee.tab.debugger.sendCommand.bind(debuggee.tab.debugger);
+      Object.assign(debuggee.tab.debugger, {
+        sendCommand: (method: string, ...rest: Array<unknown>) => {
+          sent.push(method);
+          return (sendCommand as (...args: Array<unknown>) => Promise<unknown>)(method, ...rest);
+        },
+      });
+      host.attach(key, debuggee.tab);
+      const command = (id: number, method: string) =>
+        host.handleCommandLine(
+          encodeJson({
+            type: "cdp",
+            ...key,
+            message: encodeJson({ id, method, sessionId: "t3-preview-page" }),
+          }),
+        );
+
+      const release = host.holdCommands(debuggee.tab.webContents);
+      yield* command(1, "DOM.getDocument");
+      yield* command(2, "DOM.enable");
+      expect(sent).toEqual([]);
+      release();
+      expect(sent).toEqual(["DOM.getDocument", "DOM.enable"]);
+      yield* command(3, "Page.enable");
+      expect(sent).toEqual(["DOM.getDocument", "DOM.enable", "Page.enable"]);
+    }),
+  );
+
   it.effect("saves a server tab's download under its CDP guid where the server asked", () =>
     Effect.gen(function* () {
       const host = yield* DesktopBrowserHost.make;

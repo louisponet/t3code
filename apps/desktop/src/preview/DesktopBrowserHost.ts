@@ -62,6 +62,12 @@ export class DesktopBrowserHost extends Context.Service<
     readonly attach: (key: DesktopBrowserTabKey, debuggee: DesktopBrowserTabDebugger) => void;
     readonly detach: (key: DesktopBrowserTabKey) => void;
     readonly humanStartedDownload: (source: Electron.WebContents) => boolean;
+    /**
+     * Queues the server's commands for this page until the returned release
+     * runs, then replays them in order, so the agent cannot act mid-way through
+     * something the person started.
+     */
+    readonly holdCommands: (webContents: Electron.WebContents) => () => void;
     readonly placeDownload: (source: Electron.WebContents, item: Electron.DownloadItem) => boolean;
     readonly pointers: Stream.Stream<{
       readonly key: DesktopBrowserTabKey;
@@ -161,24 +167,43 @@ export const make = Effect.gen(function* () {
     emit({ type: "attached", ...key });
   };
 
-  const handleCommandLine = (line: string) =>
-    Effect.sync(() => {
-      const command = decodeCommand(line);
-      if (Option.isNone(command)) return;
-      const tab = tabs.get(keyOf(command.value));
-      if (!tab) return;
-      if (command.value.type === "pointer") {
-        const { threadId, tabId, phase, x, y } = command.value;
-        runFork(PubSub.publish(pointers, { key: { threadId, tabId }, phase, x, y }));
-        return;
-      }
-      if (command.value.type === "release") {
-        tab.relay = null;
-        return;
-      }
-      if (AGENT_INPUT_COMMAND.test(command.value.message)) tab.agentInputAt = performance.now();
-      relayFor(tab).receive(command.value.message);
-    });
+  const held = new Map<Electron.WebContents, Array<string>>();
+
+  const runCommandLine = (line: string) => {
+    const command = decodeCommand(line);
+    if (Option.isNone(command)) return;
+    const tab = tabs.get(keyOf(command.value));
+    if (!tab) return;
+    const queue = held.get(tab.debuggee.webContents);
+    if (queue) {
+      queue.push(line);
+      return;
+    }
+    if (command.value.type === "pointer") {
+      const { threadId, tabId, phase, x, y } = command.value;
+      runFork(PubSub.publish(pointers, { key: { threadId, tabId }, phase, x, y }));
+      return;
+    }
+    if (command.value.type === "release") {
+      tab.relay = null;
+      return;
+    }
+    if (AGENT_INPUT_COMMAND.test(command.value.message)) tab.agentInputAt = performance.now();
+    relayFor(tab).receive(command.value.message);
+  };
+
+  const handleCommandLine = (line: string) => Effect.sync(() => runCommandLine(line));
+
+  const holdCommands = (webContents: Electron.WebContents) => {
+    if (held.has(webContents)) return () => {};
+    const queue: Array<string> = [];
+    held.set(webContents, queue);
+    return () => {
+      if (held.get(webContents) !== queue) return;
+      held.delete(webContents);
+      for (const line of queue) runCommandLine(line);
+    };
+  };
 
   const humanStartedDownload = (source: Electron.WebContents) => {
     const tab = [...tabs.values()].find((candidate) => candidate.debuggee.webContents === source);
@@ -211,6 +236,7 @@ export const make = Effect.gen(function* () {
     detach,
     placeDownload,
     humanStartedDownload,
+    holdCommands,
   });
 });
 

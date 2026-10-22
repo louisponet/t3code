@@ -428,7 +428,7 @@ function SidebarRail({
     setTargetWidth(width);
 
     return {
-      width,
+      size: width,
       edge: side === "left" ? "right" : "left",
       resize(value) {
         const options = latestResizable.current;

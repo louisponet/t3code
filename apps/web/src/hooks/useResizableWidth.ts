@@ -70,7 +70,7 @@ export function useResizableWidth(options: UseResizableWidthOptions): {
     // renders its own transition-duration, so override a property it leaves alone.
     host?.style.setProperty("transition-property", "none");
     return {
-      width: clampedWidth,
+      size: clampedWidth,
       edge,
       resize(value) {
         const nextWidth = latestOptions.current.clamp(value);

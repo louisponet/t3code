@@ -1,10 +1,17 @@
+import { useAtomValue } from "@effect/atom-react";
+import { Atom } from "effect/reactivity";
 import { useCallback } from "react";
 import { useNavigation } from "@react-navigation/native";
-import { AuthTerminalOperateScope, AuthTerminalReadScope } from "@t3tools/contracts";
+import {
+  AuthTerminalOperateScope,
+  AuthTerminalReadScope,
+  type EnvironmentId,
+} from "@t3tools/contracts";
 import type { HelixOpenOptions } from "@t3tools/client-runtime/helix-review";
 import { useThreadSelection } from "../../state/use-thread-selection";
 import { useSelectedThreadWorktree } from "../../state/use-selected-thread-worktree";
 import { useKnownTerminalSessions } from "../../state/use-terminal-session";
+import { serverEnvironment } from "../../state/server";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 import { useRemoteEnvironmentRuntime } from "../../state/use-remote-environment-registry";
 import { uuidv4 } from "../../lib/uuid";
@@ -12,12 +19,28 @@ import { prepareCoordinatedHelixReviewLaunch } from "./helixReviewLaunch";
 import { stagePendingTerminalLaunch } from "./terminalLaunchContext";
 import { stageHelixOpen } from "./helixOpenContext";
 
+const HELIX_DISABLED_ATOM = Atom.make(false).pipe(Atom.withLabel("mobile-helix-enabled:none"));
+// Server config changes on every provider status event; a boolean keeps the screens this switches
+// from re-rendering for anything but the setting itself.
+const helixEnabledAtom = Atom.family((environmentId: EnvironmentId) =>
+  Atom.make(
+    (get) => get(serverEnvironment.settingsValueAtom(environmentId))?.helixEnabled === true,
+  ).pipe(Atom.withLabel(`mobile-helix-enabled:${environmentId}`)),
+);
+
+export function useHelixEnabled(environmentId: EnvironmentId | null) {
+  return useAtomValue(
+    environmentId === null ? HELIX_DISABLED_ATOM : helixEnabledAtom(environmentId),
+  );
+}
+
 export function useOpenInHelix(environmentId: string | null, threadId: string | null) {
   const navigation = useNavigation();
   const { selectedThread, selectedThreadProject } = useThreadSelection();
   const { selectedThreadWorktreePath } = useSelectedThreadWorktree();
+  const enabled = useHelixEnabled(selectedThread?.environmentId ?? null);
   const { sessions } = useKnownTerminalSessions({
-    environmentId: selectedThread?.environmentId ?? null,
+    environmentId: enabled ? (selectedThread?.environmentId ?? null) : null,
     threadId: selectedThread?.id ?? null,
   });
   const canRead = useEnvironmentScope(selectedThread?.environmentId ?? null, AuthTerminalReadScope);
@@ -28,6 +51,7 @@ export function useOpenInHelix(environmentId: string | null, threadId: string | 
   const runtime = useRemoteEnvironmentRuntime(selectedThread?.environmentId ?? null);
   const os = runtime?.serverConfig?.environment.platform.os;
   const available = Boolean(
+    enabled &&
     selectedThread &&
     selectedThread.environmentId === environmentId &&
     selectedThread.id === threadId &&

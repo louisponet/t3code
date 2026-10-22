@@ -681,6 +681,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["allow simulator emulator ios android drive tools sessions"],
   },
   {
+    id: "helix",
+    title: "Use Helix",
+    to: "/settings/integrations",
+    searchTerms: ["hx hx-t3 editor code review diff pull request pr source edit"],
+    environmentOnly: true,
+  },
+  {
     id: "device-hub",
     title: "Device hub",
     to: "/settings/integrations",

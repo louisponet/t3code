@@ -713,6 +713,7 @@ const PreviewPanel = lazy(() =>
   import("./preview/PreviewPanel").then((module) => ({ default: module.PreviewPanel })),
 );
 const DiffPanel = lazy(() => import("./DiffPanel"));
+const HelixDiffPanel = lazy(() => import("./HelixDiffPanel"));
 const selectAutoShowFloatingPreview = (settings: { browserAutoShowFloatingPreview: boolean }) =>
   settings.browserAutoShowFloatingPreview;
 const DevicePanel = lazy(() =>
@@ -4929,7 +4930,7 @@ export default function ChatView(props: ChatViewProps) {
     }
   };
   const runProjectScriptStable = useStableCallback(runProjectScript);
-  const canReviewInHelix = isServerThread && activeProject !== null;
+  const canReviewInHelix = settings.helixEnabled && isServerThread && activeProject !== null;
   const reviewInHelix = useStableCallback(() => {
     if (!activeThreadRef) return;
     useDiffPanelStore.getState().selectGitScope(activeThreadRef, "branch");
@@ -10569,6 +10570,7 @@ export default function ChatView(props: ChatViewProps) {
         url: singlePullRequest.url,
       })
     : renderedRightPanelSurface;
+  const ActiveDiffPanel = settings.helixEnabled ? HelixDiffPanel : DiffPanel;
   const rightPanelContent = activeThreadRef ? (
     renderedRightPanelSurface?.kind === "preview" ? (
       <Suspense fallback={null}>
@@ -10604,7 +10606,7 @@ export default function ChatView(props: ChatViewProps) {
       />
     ) : renderedRightPanelSurface?.kind === "diff" ? (
       <Suspense fallback={null}>
-        <DiffPanel
+        <ActiveDiffPanel
           key={activeThreadKey}
           mode="embedded"
           composerDraftTarget={composerDraftTarget}

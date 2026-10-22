@@ -1,4 +1,3 @@
-import HelixPanel from "../HelixPanel";
 import { Spinner } from "~/components/ui/spinner";
 import {
   AuthPreviewOperateScope,
@@ -41,7 +40,7 @@ import { mediaFileReference } from "@t3tools/client-runtime/media-reference";
 import { FolderTree, Globe2, WrapTextIcon } from "lucide-react";
 import { Code2, Eye, Table2 } from "lucide";
 import * as Schema from "effect/Schema";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { isBrowserPreviewFile, openFileInPreview } from "~/browser/openFileInPreview";
 import { useAssetUrlRefresh, useAssetUrlState } from "~/assets/assetUrls";
@@ -50,7 +49,11 @@ import { MediaVideoPlayer } from "~/components/media/MediaVideoPlayer";
 import { MediaActions, type MediaActionSource } from "~/components/media/MediaActions";
 import { MorphIcon } from "~/components/MorphIcon";
 import { useRemoteOpenState } from "~/remoteOpen";
-import { useClientSettings, useUpdateClientSettings } from "~/hooks/useSettings";
+import {
+  useClientSettings,
+  useEnvironmentSettings,
+  useUpdateClientSettings,
+} from "~/hooks/useSettings";
 import { useTheme } from "~/hooks/useTheme";
 import { getLocalStorageItem, setLocalStorageItem, useLocalStorage } from "~/hooks/useLocalStorage";
 import { useWorkspaceMutationRefresh } from "~/hooks/useWorkspaceMutationRefresh";
@@ -144,6 +147,7 @@ const FILE_EXPLORER_STORAGE_KEY = "t3code.fileExplorerOpen";
 const RENDER_MARKDOWN_STORAGE_KEY = "t3code.renderMarkdown";
 const RENDER_BROWSER_FILE_STORAGE_KEY = "t3code.renderBrowserFile";
 const RENDER_TABLE_STORAGE_KEY = "t3code.renderTable";
+const HelixPanel = lazy(() => import("../HelixPanel"));
 type FilePostRender = <LAnnotation>(
   fileContainer: HTMLElement,
   instance: FileInstance<LAnnotation, undefined>,
@@ -1061,6 +1065,8 @@ export default function FilePreviewPanel({
   const fileAccess = useFilesystemReadAccess(environmentId);
   const { canReadFiles } = fileAccess;
   const canWriteFiles = useEnvironmentScope(environmentId, AuthFilesystemWriteScope);
+  const helixEnabled = useEnvironmentSettings(environmentId, (settings) => settings.helixEnabled);
+  const revealInHelix = helixEnabled && revealLine !== null;
   const file = useProjectFileQuery(
     environmentId,
     cwd,
@@ -1397,7 +1403,7 @@ export default function FilePreviewPanel({
               alt={relativePath}
               workspaceMutationId={workspaceMutationId}
             />
-          ) : relativePath && renderBrowserFile && absolutePath && revealLine === null ? (
+          ) : relativePath && renderBrowserFile && absolutePath && !revealInHelix ? (
             <WorkspaceBrowserPreview
               key={absolutePath}
               environmentId={environmentId}
@@ -1441,7 +1447,7 @@ export default function FilePreviewPanel({
               <Spinner size="lg" />
             </div>
           ) : relativePath && file.data ? (
-            isMarkdown && renderMarkdown && revealLine === null ? (
+            isMarkdown && renderMarkdown && !revealInHelix ? (
               <RenderedMarkdownSurface
                 key={relativePath}
                 environmentId={environmentId}
@@ -1452,25 +1458,33 @@ export default function FilePreviewPanel({
                 readOnly={isHostFile || !canWriteFiles}
                 onPendingChange={onPendingChange}
               />
-            ) : tableDelimiter && renderTable && revealLine === null ? (
+            ) : tableDelimiter && renderTable && !revealInHelix ? (
               <DelimitedTablePreview
                 key={relativePath}
                 name={relativePath}
                 text={file.data.contents}
                 delimiter={tableDelimiter}
               />
-            ) : attachment === undefined ? (
-              <HelixPanel
-                threadRef={threadRef}
-                cwd={cwd}
-                keybindings={keybindings}
-                options={{
-                  worktreePath: cwd,
-                  filePath: relativePath,
-                  ...(revealLine ? { line: revealLine } : {}),
-                }}
-                requestId={revealRequestId}
-              />
+            ) : helixEnabled && attachment === undefined ? (
+              <Suspense
+                fallback={
+                  <div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground">
+                    <Spinner size="lg" />
+                  </div>
+                }
+              >
+                <HelixPanel
+                  threadRef={threadRef}
+                  cwd={cwd}
+                  keybindings={keybindings}
+                  options={{
+                    worktreePath: cwd,
+                    filePath: relativePath,
+                    ...(revealLine ? { line: revealLine } : {}),
+                  }}
+                  requestId={revealRequestId}
+                />
+              </Suspense>
             ) : file.data.truncated || isHostFile || !canWriteFiles ? (
               <SourceFilePreview
                 name={relativePath}

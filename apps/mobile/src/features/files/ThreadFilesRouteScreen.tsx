@@ -48,7 +48,8 @@ import { ThreadInspectorContentStack } from "../threads/thread-inspector-content
 import { FileTreeBrowser } from "./FileTreeBrowser";
 import { useFileTreeEntries } from "./useFileTreeEntries";
 import { preloadWorkspaceFileContents } from "./preload-workspace-file";
-import { useOpenInHelix } from "../terminal/useOpenInHelix";
+import { SourceFileSurface } from "./SourceFileSurface";
+import { useHelixEnabled, useOpenInHelix } from "../terminal/useOpenInHelix";
 import { useNativeColumnLayoutMetrics } from "../../native/native-layout-metrics";
 import { ThreadFileNavigatorPane } from "./thread-file-navigator-pane";
 import { AppBar } from "../../components/ui/AppBar";
@@ -319,9 +320,13 @@ function FileContent(props: {
           onRefresh={props.onRefresh}
         />
       ) : (
-        <FilePreviewNotice title="Open in Helix">
-          Open this file from its thread to view and edit the source.
-        </FilePreviewNotice>
+        <SourceFileSurface
+          contents={props.fileContents}
+          path={props.relativePath}
+          initialLine={props.initialLine}
+          headerInsetTop={props.truncated ? 0 : undefined}
+          onRefresh={props.onRefresh}
+        />
       )}
     </View>
   );
@@ -616,6 +621,8 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps) {
       : defaultViewMode(relativePath);
   const resolvedActiveMode =
     isVideoFile || isAudioFile ? "preview" : canPreview ? activeMode : "source";
+  const helixEnabled = useHelixEnabled(environmentId);
+  const helixSource = helixEnabled && resolvedActiveMode === "source";
   const helix = useOpenInHelix(environmentId, threadId);
   const openedInHelix = useRef<string | null>(null);
   const helixKey = JSON.stringify([environmentId, threadId, cwd, relativePath, targetLine]);
@@ -709,7 +716,7 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps) {
       cwd !== null &&
       relativePath !== null &&
       needsFileContents &&
-      resolvedActiveMode !== "source"
+      !helixSource
       ? projectEnvironment.readFile({
           environmentId,
           input: { cwd, relativePath },
@@ -786,7 +793,7 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps) {
       canToggleMode
         ? ({
             id: "source",
-            title: "Helix",
+            title: helixEnabled ? "Helix" : "Source",
             icon: "doc.text",
             inline: true,
             onPress: () => setModeOverride({ path: relativePath, mode: "source" }),
@@ -874,6 +881,7 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps) {
     assetPreview.refresh,
     previewUri,
     canPreview,
+    helixEnabled,
     isAudioFile,
     isBrowserFile,
     isImageFile,
@@ -929,7 +937,7 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps) {
     );
   }
 
-  if (resolvedActiveMode === "source") {
+  if (helixSource) {
     return (
       <View className="flex-1 bg-sheet">
         <NativeStackScreenOptions options={{ title: basename(relativePath) }} />

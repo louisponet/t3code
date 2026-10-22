@@ -72,7 +72,7 @@ function compactMenuStatus(gitStatus: VcsStatusResult | null): string {
 type HeaderItem = Record<string, unknown>;
 type HeaderItems = HeaderItem[];
 type ThreadGitHeaderActionItems = {
-  readonly helix: HeaderItem;
+  readonly helix: HeaderItem | null;
   readonly terminal: HeaderItem;
   readonly files: HeaderItem;
   readonly git: HeaderItem;
@@ -111,6 +111,7 @@ type ThreadGitControlsProps = ThreadGitMenuProps & {
   readonly onOpenTerminal: (terminalId?: string | null) => void;
   readonly onOpenNewTerminal: () => void;
   readonly onRunProjectScript: (script: ProjectScript) => Promise<void>;
+  readonly helixEnabled?: boolean;
   readonly onReviewInHelix?: () => void;
 };
 
@@ -280,17 +281,19 @@ function useThreadGitHeaderActionItems(props: ThreadGitControlsProps): ThreadGit
 
   return useMemo(
     () => ({
-      helix: {
-        accessibilityLabel: "Open Helix editor",
-        disabled: !props.onReviewInHelix,
-        icon: { name: "chevron.left.forwardslash.chevron.right", type: "sfSymbol" },
-        identifier: "thread-right-helix",
-        label: "Helix",
-        onPress: props.onReviewInHelix,
-        sharesBackground: true,
-        type: "button",
-        variant: "plain",
-      },
+      helix: props.helixEnabled
+        ? {
+            accessibilityLabel: "Open Helix editor",
+            disabled: !props.onReviewInHelix,
+            icon: { name: "chevron.left.forwardslash.chevron.right", type: "sfSymbol" },
+            identifier: "thread-right-helix",
+            label: "Helix",
+            onPress: props.onReviewInHelix,
+            sharesBackground: true,
+            type: "button",
+            variant: "plain",
+          }
+        : null,
       terminal: {
         accessibilityLabel: "Open terminal",
         disabled: !props.canOpenTerminal,
@@ -445,6 +448,7 @@ function useThreadGitHeaderActionItems(props: ThreadGitControlsProps): ThreadGit
       props.canOpenTerminal,
       props.canOperateTerminal,
       props.gitStatus,
+      props.helixEnabled,
       props.onMergeBack,
       props.onOpenNewTerminal,
       props.onOpenTerminal,
@@ -460,7 +464,9 @@ export function useThreadGitRightHeaderItems(props: ThreadGitControlsProps): Hea
   const actionItems = useThreadGitHeaderActionItems(props);
   return useMemo(
     () =>
-      [actionItems.helix, actionItems.git, actionItems.files, actionItems.terminal] as HeaderItems,
+      [actionItems.helix, actionItems.git, actionItems.files, actionItems.terminal].filter(
+        (item) => item !== null,
+      ),
     [actionItems],
   );
 }
@@ -469,7 +475,9 @@ export function useThreadGitCenterHeaderItems(props: ThreadGitControlsProps): He
   const actionItems = useThreadGitHeaderActionItems(props);
   return useMemo(
     () =>
-      [actionItems.helix, actionItems.files, actionItems.git, actionItems.terminal] as HeaderItems,
+      [actionItems.helix, actionItems.files, actionItems.git, actionItems.terminal].filter(
+        (item) => item !== null,
+      ),
     [actionItems],
   );
 }

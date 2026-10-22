@@ -244,6 +244,8 @@ const TABS: ReadonlyArray<{ value: DetailTab; label: string }> = [
 // The diff viewer pulls in its worker pool, so load it only when the reader approaches Code.
 const loadCodeTab = () => import("./PullRequestCodeTab");
 const PullRequestCodeTab = lazy(loadCodeTab);
+const loadHelixCodeTab = () => import("./HelixPullRequestCodeTab");
+const HelixPullRequestCodeTab = lazy(loadHelixCodeTab);
 
 /**
  * What the last hand-off wrote into each draft, kept outside React because the panel that wrote it
@@ -458,10 +460,13 @@ export function PullRequestDetailPanel({
     readonly path: string;
     readonly nonce: number;
   } | null>(null);
+  const helixEnabled = useEnvironmentSettings(environmentId, (settings) => settings.helixEnabled);
+  const CodeTab = helixEnabled ? HelixPullRequestCodeTab : PullRequestCodeTab;
+  const loadSelectedCodeTab = helixEnabled ? loadHelixCodeTab : loadCodeTab;
   const openFileInCode = (path: string) => {
     selectCodeCommit(null);
     setCodeRevealRequest((previous) => ({ path, nonce: (previous?.nonce ?? 0) + 1 }));
-    void loadCodeTab();
+    void loadSelectedCodeTab();
     setTab("code");
   };
   const guideOpenRequested = useGuideRunStore(
@@ -2566,7 +2571,7 @@ export function PullRequestDetailPanel({
             value={tab}
             onValueChange={setTab}
             onTabIntent={(item) => {
-              if (item === "code") void loadCodeTab();
+              if (item === "code") void loadSelectedCodeTab();
             }}
           >
             {tab === "summary" ? (
@@ -2827,8 +2832,12 @@ export function PullRequestDetailPanel({
             {mountedTabs.has("code") ? (
               <div className={cn("absolute inset-0", tab !== "code" && "invisible")}>
                 <Suspense fallback={<DiffPanelLoadingState label="Loading pull request diff..." />}>
-                  <PullRequestCodeTab
-                    key={`${environmentId}:${reference.projectId}:${detail.url}:${detail.headSha ?? ""}`}
+                  <CodeTab
+                    key={
+                      helixEnabled
+                        ? `${environmentId}:${reference.projectId}:${detail.url}:${detail.headSha ?? ""}`
+                        : undefined
+                    }
                     scrollerRef={scrollerRefs.code}
                     onAddToAgentSelection={addSelectionToAgent}
                     environmentId={environmentId}

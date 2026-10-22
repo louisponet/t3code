@@ -66,16 +66,17 @@ import { SidebarHeaderIconButton } from "./SidebarThreadHeader";
 import { groupSidebarTools, worstToolTone } from "./SidebarToolsSection.logic";
 
 const TOOLS_EXPANDED_KEY = "t3code:sidebar:tools-expanded";
-const TOOLS_MAX_HEIGHT_KEY = "t3code:sidebar:tools-max-height";
-// Fractions of the viewport height, which the sidebar spans. The list grows with its tools up to
-// the cap, so the cap stays meaningful when the window resizes.
+const TOOLS_HEIGHT_KEY = "t3code:sidebar:tools-height";
+// Fractions of the viewport height, which the sidebar spans, so sizes follow window resizes.
+// Until the user drags the list, it grows with its tools up to the default cap; after that it
+// keeps the dragged height, leaving empty space below a short list.
 const DEFAULT_TOOLS_MAX_HEIGHT = 0.25;
-const MIN_TOOLS_MAX_HEIGHT = 0.05;
-const MAX_TOOLS_MAX_HEIGHT = 0.75;
-const ToolsMaxHeightSchema = Schema.NullOr(Schema.Finite);
+const MIN_TOOLS_HEIGHT = 0.05;
+const MAX_TOOLS_HEIGHT = 0.75;
+const ToolsHeightSchema = Schema.NullOr(Schema.Finite);
 
-const clampToolsMaxHeight = (fraction: number) =>
-  Math.min(MAX_TOOLS_MAX_HEIGHT, Math.max(MIN_TOOLS_MAX_HEIGHT, fraction));
+const clampToolsHeight = (fraction: number) =>
+  Math.min(MAX_TOOLS_HEIGHT, Math.max(MIN_TOOLS_HEIGHT, fraction));
 
 type ToolMenuAction = "open" | "restart" | "stop" | "refresh" | "edit" | "remove";
 
@@ -126,33 +127,35 @@ export const SidebarToolsSection = memo(function SidebarToolsSection() {
     AuthSettingsWriteScope,
   );
   const [expanded, setExpanded] = useLocalStorage(TOOLS_EXPANDED_KEY, true, Schema.Boolean);
-  const [storedMaxHeight, setStoredMaxHeight] = useLocalStorage(
-    TOOLS_MAX_HEIGHT_KEY,
+  const [storedHeight, setStoredHeight] = useLocalStorage(
+    TOOLS_HEIGHT_KEY,
     null,
-    ToolsMaxHeightSchema,
+    ToolsHeightSchema,
   );
-  const maxHeight = clampToolsMaxHeight(storedMaxHeight ?? DEFAULT_TOOLS_MAX_HEIGHT);
   const showList = expanded && rows.length > 0;
   const listRef = useRef<HTMLDivElement>(null);
   const { refresh: _refresh, ...resizeHandlers } = useResizeDrag<HTMLDivElement>(() => {
     const list = listRef.current;
     if (!list) return null;
     const viewportHeight = window.innerHeight;
+    // Restored rather than removed: a click without a drag stores nothing, so React will not
+    // rewrite the rendered size.
+    const { height, maxHeight } = list.style;
     return {
-      // The rendered height, not the cap: a list shorter than its cap shrinks as soon as the
-      // drag starts, and dragging past its content raises the cap for future tools.
       size: list.getBoundingClientRect().height,
       edge: "top",
       resize(value) {
-        const next = clampToolsMaxHeight(value / viewportHeight) * viewportHeight;
-        list.style.setProperty("max-height", `${next}px`);
+        const next = clampToolsHeight(value / viewportHeight) * viewportHeight;
+        list.style.setProperty("max-height", "none");
+        list.style.setProperty("height", `${next}px`);
         return next;
       },
       finish(size, moved) {
-        if (moved) setStoredMaxHeight(size / viewportHeight);
+        if (moved) setStoredHeight(size / viewportHeight);
       },
       cleanup() {
-        list.style.removeProperty("max-height");
+        list.style.maxHeight = maxHeight;
+        list.style.height = height;
       },
     };
   }, String(showList));
@@ -270,7 +273,7 @@ export const SidebarToolsSection = memo(function SidebarToolsSection() {
                 aria-orientation="horizontal"
                 aria-label="Resize tools"
                 className="absolute inset-x-0 top-0 z-10 h-1.5 cursor-row-resize touch-none after:absolute after:inset-x-0 after:top-0 after:h-px hover:after:bg-sidebar-border"
-                onDoubleClick={() => setStoredMaxHeight(null)}
+                onDoubleClick={() => setStoredHeight(null)}
                 {...resizeHandlers}
               />
             }
@@ -311,7 +314,11 @@ export const SidebarToolsSection = memo(function SidebarToolsSection() {
           hideScrollbars
           scrollFade
           className="h-auto"
-          style={{ maxHeight: `${maxHeight * 100}vh` }}
+          style={
+            storedHeight === null
+              ? { maxHeight: `${DEFAULT_TOOLS_MAX_HEIGHT * 100}vh` }
+              : { height: `${clampToolsHeight(storedHeight) * 100}vh` }
+          }
         >
           {groupSidebarTools(rows, labelById).map((group) => (
             <div key={group.environmentId}>

@@ -11,14 +11,17 @@ import { useNavigate } from "@tanstack/react-router";
 import { useRef } from "react";
 
 import { mergeEnvironmentSettings } from "../../hooks/useSettings";
-import { getCustomModelOptionsByInstance } from "../../modelSelection";
+import {
+  getCustomModelOptionsByInstance,
+  resolveEffectiveDefaultModelSelection,
+} from "../../modelSelection";
 import {
   applyProviderInstanceSettings,
   deriveProviderInstanceEntries,
   resolveDefaultProviderModelSelection,
   sortProviderInstanceEntries,
 } from "../../providerInstances";
-import { useEnvironments } from "../../state/environments";
+import { useEnvironmentProviders, useEnvironments } from "../../state/environments";
 import { EMPTY_SERVER_PROVIDERS } from "../../state/server";
 import { resolveEnvModeLabel, WORKTREE_SUBMODULES_LABELS } from "../BranchToolbar.logic";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
@@ -58,10 +61,14 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
   const updateSettings = useUpdateScopedSettings();
   const navigate = useNavigate();
   const { environments } = useEnvironments();
+  const providersByEnvironment = useEnvironmentProviders();
   const representative = target
     ? environments.find((environment) => environment.environmentId === target.environmentId)
     : undefined;
-  const providers = representative?.serverConfig?.providers ?? EMPTY_SERVER_PROVIDERS;
+  const providers =
+    (representative?.serverConfig
+      ? providersByEnvironment.get(representative.environmentId)
+      : undefined) ?? EMPTY_SERVER_PROVIDERS;
   const entries = sortProviderInstanceEntries(
     applyProviderInstanceSettings(
       deriveProviderInstanceEntries(providers),
@@ -79,7 +86,6 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
   const PermissionIcon = runtimeModeConfig[settings.defaultRuntimeMode].icon;
   const mixedWorkspace = useScopedSettingsMixed(["defaultThreadEnvMode"]);
   const mixedSubmodules = useScopedSettingsMixed(["worktreeSubmodules"]);
-  const mixedBrowser = useScopedSettingsMixed(["enableAgentBrowserAccess"]);
   const mixedAutoPull = useScopedSettingsMixed(["defaultAutoPull"]);
   const mixedAgentCredits = useScopedSettingsMixed(["removeAgentCreditsOnMerge"]);
   const mixedMergeMethod = useScopedSettingsMixed(["pullRequestMergeMethod"]);
@@ -100,16 +106,16 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
       const environment = environments.find(
         (entry) => entry.environmentId === candidate.environmentId,
       );
-      const config = environment?.serverConfig;
-      if (!config) continue;
+      const providers = providersByEnvironment.get(candidate.environmentId);
+      if (!environment?.serverConfig || !providers) continue;
       const entry = applyProviderInstanceSettings(
-        deriveProviderInstanceEntries(config.providers),
+        deriveProviderInstanceEntries(providers),
         candidate.settings,
         candidate.projectId,
       ).find((option) => option.instanceId === instanceId);
       const options = getCustomModelOptionsByInstance(
         mergeEnvironmentSettings(candidate.settings, settings),
-        config.providers,
+        providers,
       ).get(instanceId);
       if (
         !entry?.enabled ||
@@ -129,10 +135,13 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
   ) => {
     const value = settings[key];
     const mixed = mixedModel[key];
-    const selection = resolveDefaultProviderModelSelection(
+    const storedSelection = resolveDefaultProviderModelSelection(
       providers,
       value ?? settings.defaultModelSelection,
     );
+    const selection = storedSelection
+      ? resolveEffectiveDefaultModelSelection(settings, providers, storedSelection)
+      : null;
     const modelOptions = getCustomModelOptionsByInstance(
       settings,
       providers,
@@ -276,20 +285,8 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
 
   return (
     <SettingsSection
-      id={
-        category === "general" || category === "project"
-          ? "project-defaults"
-          : category === "integrations"
-            ? "browser-access"
-            : "source-control-defaults"
-      }
-      title={
-        category === "general" || category === "project"
-          ? "New threads"
-          : category === "integrations"
-            ? "Browser"
-            : "Repositories"
-      }
+      id={category === "source-control" ? "source-control-defaults" : "project-defaults"}
+      title={category === "source-control" ? "Repositories" : "New threads"}
     >
       {category === "project" ? (
         <>
@@ -408,7 +405,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
             }
           />
         </>
-      ) : category === "source-control" ? (
+      ) : (
         <>
           {modelRow("pullRequestReviewModelSelection", {
             ...searchableSetting("pull-request-review-model"),
@@ -600,42 +597,6 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
                   <SelectItem value="rebase">{PULL_REQUEST_MERGE_METHOD_LABELS.rebase}</SelectItem>
                 </SelectPopup>
               </Select>
-            }
-          />
-        </>
-      ) : (
-        <>
-          <SettingsRow
-            serverScoped
-            settingKeys={["enableAgentBrowserAccess"]}
-            mixed={mixedBrowser}
-            id={searchableSetting("agent-browser-access").id}
-            title="Agent browser access"
-            description={
-              isProjectScope
-                ? "Allow agents in this project to use the shared browser. Applies when the agent session next starts."
-                : "Allow agents to use the shared browser. Projects can override it."
-            }
-            resetAction={
-              settings.enableAgentBrowserAccess !==
-              DEFAULT_SERVER_SETTINGS.enableAgentBrowserAccess ? (
-                <SettingResetButton
-                  label="default browser access"
-                  onClick={() =>
-                    updateSettings({
-                      enableAgentBrowserAccess: DEFAULT_SERVER_SETTINGS.enableAgentBrowserAccess,
-                    })
-                  }
-                />
-              ) : null
-            }
-            control={
-              <Switch
-                aria-label="Agent browser access"
-                mixed={mixedBrowser}
-                checked={mixedBrowser ? false : settings.enableAgentBrowserAccess}
-                onCheckedChange={(enabled) => updateSettings({ enableAgentBrowserAccess: enabled })}
-              />
             }
           />
         </>

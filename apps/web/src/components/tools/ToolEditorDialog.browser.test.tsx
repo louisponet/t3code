@@ -1,9 +1,9 @@
 import type { EnvironmentId, EnvironmentToolId } from "@t3tools/contracts";
 import { AsyncResult } from "effect/reactivity";
-import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
+import { expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
+
+import { render } from "../../../test/render";
 
 import "~/index.css";
 
@@ -67,49 +67,37 @@ vi.mock(import("../../state/use-atom-command"), async (original) => ({
 
 import { ToolEditorDialog } from "./ToolEditorDialog";
 
-let root: Root;
-let container: HTMLDivElement;
-
-const render = (toolId?: string) =>
-  act(async () =>
-    root.render(
-      <ToolEditorDialog
-        open
-        onOpenChange={() => {}}
-        {...(toolId === undefined
-          ? {}
-          : { environmentId: "devbox" as EnvironmentId, toolId: toolId as EnvironmentToolId })}
-      />,
-    ),
+const renderDialog = (toolId?: string) =>
+  render(
+    <ToolEditorDialog
+      open
+      onOpenChange={() => {}}
+      {...(toolId === undefined
+        ? {}
+        : { environmentId: "devbox" as EnvironmentId, toolId: toolId as EnvironmentToolId })}
+    />,
   );
 const runsOn = () => page.getByRole("combobox", { name: "Runs on" });
 const addButton = () => page.getByRole("button", { name: "Add tool" });
 
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+function setup() {
   state.writable = new Set(["devbox"]);
   state.webApps = new Set(["devbox"]);
   state.rows = [];
   state.save.mockReset().mockResolvedValue(AsyncResult.success(undefined));
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-});
-afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
-  vi.unstubAllGlobals();
-});
+}
 
 it("starts a new tool on a writable environment when the primary one is read-only", async () => {
-  await render();
+  setup();
+  await using _screen = await renderDialog();
 
   await expect.element(runsOn()).toHaveTextContent("Devbox");
   await expect.element(addButton()).toBeEnabled();
 });
 
 it("keeps the environment picker usable after choosing a read-only environment", async () => {
-  await render();
+  setup();
+  await using _screen = await renderDialog();
 
   await userEvent.click(runsOn());
   await userEvent.click(page.getByRole("option", { name: "Laptop" }));
@@ -127,7 +115,8 @@ it("keeps the environment picker usable after choosing a read-only environment",
 it.each(["terminal", "browser", "web"] as const)(
   "saves a new %s tool with its own fields",
   async (kind) => {
-    await render();
+    setup();
+    await using _screen = await renderDialog();
     await userEvent.fill(page.getByRole("textbox", { name: "Name" }), "Dashboard");
     if (kind === "terminal") {
       await userEvent.fill(page.getByRole("textbox", { name: "Command", exact: true }), "lazygit");
@@ -162,6 +151,7 @@ it.each(["terminal", "browser", "web"] as const)(
 );
 
 it("preserves a web app's host port target when editing its name", async () => {
+  setup();
   const target = { kind: "environment-port", port: 8443, protocol: "https", path: "/dashboard" };
   state.rows = [
     {
@@ -171,7 +161,7 @@ it("preserves a web app's host port target when editing its name", async () => {
       definition: { kind: "web", name: "Dashboard", description: "Local app", target },
     },
   ];
-  await render("dashboard");
+  await using _screen = await renderDialog("dashboard");
   await expect
     .element(page.getByRole("textbox", { name: "Port", exact: true }))
     .toHaveValue("8443");
@@ -192,8 +182,9 @@ it("preserves a web app's host port target when editing its name", async () => {
 });
 
 it("blocks saving a web app after switching to an older environment and allows changing its kind", async () => {
+  setup();
   state.writable = new Set(["primary", "devbox"]);
-  await render();
+  await using _screen = await renderDialog();
   await expect
     .element(page.getByRole("button", { name: "Web app", exact: true }))
     .not.toBeInTheDocument();

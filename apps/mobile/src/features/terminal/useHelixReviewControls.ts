@@ -178,22 +178,18 @@ export function useHelixReviewControls(input: {
       return;
     discovered.current = contextKey;
     setError(null);
-    try {
-      const written = await write(
-        {
-          environmentId: input.environmentId,
-          threadId: input.threadId,
-          terminalId: input.terminalId,
-          lifecycleVersion: input.lifecycleVersion,
-          attachGeneration: input.attachGeneration,
-        },
-        encodeHelixReviewDiscovery(),
-      );
-      if (!written) throw new Error("Could not reach HX. Retry when the connection is ready.");
-    } catch {
-      if (latest.current.contextKey === contextKey) {
-        setError("Could not reach HX. Retry when the connection is ready.");
-      }
+    const written = await write(
+      {
+        environmentId: input.environmentId,
+        threadId: input.threadId,
+        terminalId: input.terminalId,
+        lifecycleVersion: input.lifecycleVersion,
+        attachGeneration: input.attachGeneration,
+      },
+      encodeHelixReviewDiscovery(),
+    ).catch(() => false);
+    if (!written && latest.current.contextKey === contextKey) {
+      setError("Could not reach HX. Retry when the connection is ready.");
     }
   }, [
     contextKey,
@@ -229,7 +225,7 @@ export function useHelixReviewControls(input: {
       setBusy(true);
       setError(null);
       setNotice(null);
-      try {
+      const send = async () => {
         const controller = controllerRef.current;
         if (!controller) throw new Error("HX controls are not ready yet.");
         controller.update(latest.current.target, latest.current.markers);
@@ -246,26 +242,31 @@ export function useHelixReviewControls(input: {
                 : null,
           );
         return id;
-      } catch (cause) {
-        if (
-          latest.current.contextKey ===
-          JSON.stringify([
-            captured.environmentId,
-            captured.threadId,
-            captured.terminalId,
-            captured.lifecycleVersion,
-            captured.attachGeneration,
-          ])
-        )
-          setError(
-            cause instanceof Error ? cause.message : "HX could not accept this action. Try again.",
-          );
-        return false;
-      } finally {
-        setRetry(controllerRef.current?.getRetry() ?? null);
-        busyRef.current = false;
-        setBusy(false);
-      }
+      };
+      return send()
+        .catch((cause: unknown) => {
+          if (
+            latest.current.contextKey ===
+            JSON.stringify([
+              captured.environmentId,
+              captured.threadId,
+              captured.terminalId,
+              captured.lifecycleVersion,
+              captured.attachGeneration,
+            ])
+          )
+            setError(
+              cause instanceof Error
+                ? cause.message
+                : "HX could not accept this action. Try again.",
+            );
+          return false as const;
+        })
+        .finally(() => {
+          setRetry(controllerRef.current?.getRetry() ?? null);
+          busyRef.current = false;
+          setBusy(false);
+        });
     },
     [],
   );

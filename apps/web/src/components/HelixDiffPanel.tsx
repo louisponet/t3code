@@ -2,12 +2,11 @@ import { useAtomValue } from "@effect/atom-react";
 import { useParams } from "@tanstack/react-router";
 import type { ScopedThreadRef } from "@t3tools/contracts";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { type DraftId } from "../composerDraftStore";
 import { selectThreadDiffPanelSelection, useDiffPanelStore } from "../diffPanelStore";
-import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { useCheckpointDiff } from "~/lib/checkpointDiffState";
-import { useProject, useThreadProjection, useThreadShell } from "../state/entities";
+import { useProject, useThreadCheckpointSummaries, useThreadShell } from "../state/entities";
 import { useEnvironmentQuery } from "../state/query";
 import { reviewEnvironment } from "../state/review";
 import { serverEnvironment } from "../state/server";
@@ -22,29 +21,24 @@ export default function HelixDiffPanel({
   mode?: DiffPanelMode;
   composerDraftTarget: ScopedThreadRef | DraftId;
   workspaceMutationId: string | null;
+  visible: boolean;
 }) {
   const threadRef = useParams({ strict: false, select: (params) => resolveThreadRouteRef(params) });
   const thread = useThreadShell(threadRef);
   const project = useProject(
     thread ? { environmentId: thread.environmentId, projectId: thread.projectId } : null,
   );
-  const projection = useThreadProjection(threadRef)?.projection ?? null;
   const cwd = thread?.worktreePath ?? project?.workspaceRoot;
   const config = useAtomValue(serverEnvironment.configValueAtom(threadRef?.environmentId ?? null));
   const selection = useDiffPanelStore((state) =>
     selectThreadDiffPanelSelection(state.byThreadKey, threadRef),
   );
-  const { turnDiffSummaries, inferredCheckpointTurnCountByRunId } =
-    useTurnDiffSummaries(projection);
-  const turns = useMemo(
-    () => [...turnDiffSummaries].sort((a, b) => b.completedAt.localeCompare(a.completedAt)),
-    [turnDiffSummaries],
+  const turns = useThreadCheckpointSummaries(threadRef).toSorted((a, b) =>
+    b.completedAt.localeCompare(a.completedAt),
   );
   const selectedTurn =
     selection.kind === "turn" ? turns.find((turn) => turn.runId === selection.turnId) : undefined;
-  const turnCount = selectedTurn
-    ? (selectedTurn.checkpointTurnCount ?? inferredCheckpointTurnCountByRunId[selectedTurn.runId])
-    : undefined;
+  const turnCount = selectedTurn?.checkpointTurnCount;
   const checkpoint = useCheckpointDiff(
     {
       environmentId: threadRef?.environmentId ?? null,
@@ -95,9 +89,7 @@ export default function HelixDiffPanel({
         <option value="unstaged">Uncommitted</option>
         {turns.map((turn, index) => (
           <option key={turn.runId} value={`turn:${turn.runId}`}>
-            {index === 0
-              ? "Latest turn"
-              : `Turn ${turn.checkpointTurnCount ?? inferredCheckpointTurnCountByRunId[turn.runId] ?? "?"}`}
+            {index === 0 ? "Latest turn" : `Turn ${turn.checkpointTurnCount}`}
           </option>
         ))}
       </select>

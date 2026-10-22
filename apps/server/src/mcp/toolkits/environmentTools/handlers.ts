@@ -39,28 +39,27 @@ function listing(
  * Writes under the calling thread's lock and re-checks the caller there: the turn may have
  * ended, or the thread's modes changed, while this waited for it.
  */
-const writeTools = <R>(
+const writeTools = Effect.fn("EnvironmentToolsMcp.writeTools")(function* <R>(
   check: Effect.Effect<unknown, OrchestratorMcpFailure, R>,
   patch: (
     current: Readonly<Record<string, unknown>>,
   ) => Effect.Effect<Record<string, EnvironmentToolDefinition | null>, OrchestratorMcpFailure>,
-) =>
-  Effect.gen(function* () {
-    const scope = yield* McpInvocationContext.McpInvocationContext;
-    const executor = yield* ThreadCommandExecutor.ThreadCommandExecutor;
-    const settings = yield* Settings.ServerSettingsService;
-    const environmentTools = yield* EnvironmentTools.EnvironmentTools;
-    const update = Effect.gen(function* () {
-      yield* check;
-      const current = yield* settings.getSettings.pipe(Effect.mapError(unavailable));
-      const tools = yield* patch(current.tools);
-      const next = yield* settings.updateSettings({ tools }).pipe(Effect.mapError(unavailable));
-      return listing(next.tools, yield* environmentTools.statuses);
-    });
-    return yield* scope.thread === undefined
-      ? update
-      : executor.withLock(scope.thread.threadId, update);
+) {
+  const scope = yield* McpInvocationContext.McpInvocationContext;
+  const executor = yield* ThreadCommandExecutor.ThreadCommandExecutor;
+  const settings = yield* Settings.ServerSettingsService;
+  const environmentTools = yield* EnvironmentTools.EnvironmentTools;
+  const update = Effect.gen(function* () {
+    yield* check;
+    const current = yield* settings.getSettings.pipe(Effect.mapError(unavailable));
+    const tools = yield* patch(current.tools);
+    const next = yield* settings.updateSettings({ tools }).pipe(Effect.mapError(unavailable));
+    return listing(next.tools, yield* environmentTools.statuses);
   });
+  return yield* scope.thread === undefined
+    ? update
+    : executor.withLock(scope.thread.threadId, update);
+});
 
 export const layer = McpToolAccess.toLayer(EnvironmentToolsToolkit, {
   t3_environment_tools_list: McpToolAccess.reads(({ toolId }) =>

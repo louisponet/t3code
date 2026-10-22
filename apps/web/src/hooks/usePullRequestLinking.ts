@@ -1,4 +1,3 @@
-import { useMemo } from "react";
 import { sourceControlRepositorySelector } from "@t3tools/shared/sourceControl";
 import type {
   EnvironmentId,
@@ -27,7 +26,11 @@ import {
   parseChangeRequestUrl,
   type ChangeRequestLink,
 } from "~/lib/openPullRequestLink";
-import { useProjects, useServerConfigs } from "~/state/entities";
+import { useAtomValue } from "@effect/atom-react";
+import { Atom } from "effect/reactivity";
+import { appAtomRegistry } from "~/rpc/atomRegistry";
+import { useProjects } from "~/state/entities";
+import { environmentServerConfigsAtom } from "~/state/server";
 import { threadEnvironment } from "~/state/threads";
 import { useAtomCommand } from "~/state/use-atom-command";
 
@@ -41,39 +44,45 @@ export function canLinkChangeRequest(
   return findProjectForChangeRequest(projects, parsed) !== undefined;
 }
 
+// A string, so provider status pushes and snapshots that keep the mode don't
+// re-render every link renderer.
+const linkModeAtom = Atom.family((environmentId: EnvironmentId | null) =>
+  Atom.make((get) =>
+    threadPullRequestLinkMode(
+      environmentId === null
+        ? undefined
+        : get(environmentServerConfigsAtom).get(environmentId)?.environment.capabilities,
+    ),
+  ).pipe(Atom.withLabel("pull-request-link-mode")),
+);
+
 type CommandRunner<C> =
   C extends AtomCommand<infer W, infer A, infer E>
     ? (value: W) => Promise<AtomCommandResult<A, E>>
     : never;
 
 export function usePullRequestLinking(environmentId: EnvironmentId | null | undefined) {
-  const configs = useServerConfigs();
   const projects = useProjects();
-  const capabilities =
-    environmentId == null ? undefined : configs.get(environmentId)?.environment.capabilities;
+  const mode = useAtomValue(linkModeAtom(environmentId ?? null));
   const link = useAtomCommand(threadEnvironment.linkPullRequest, { reportFailure: false });
   const unlink = useAtomCommand(threadEnvironment.unlinkPullRequest, { reportFailure: false });
   const updateMetadata = useAtomCommand(threadEnvironment.updateMetadata, { reportFailure: false });
-  return useMemo(
-    () =>
-      createPullRequestLinking({
-        environmentId,
-        capabilities,
-        projects,
-        commands: { link, unlink, updateMetadata },
-      }),
-    [capabilities, environmentId, link, projects, unlink, updateMetadata],
-  );
+  return createPullRequestLinking({
+    environmentId,
+    mode,
+    projects,
+    commands: { link, unlink, updateMetadata },
+  });
 }
 
 export function createPullRequestLinking({
   environmentId,
-  capabilities,
+  mode,
   projects,
   commands: { link, unlink, updateMetadata },
 }: {
   environmentId: EnvironmentId | null | undefined;
-  capabilities: Parameters<typeof threadPullRequestLinkMode>[0];
+  mode: ReturnType<typeof threadPullRequestLinkMode>;
   projects: ReadonlyArray<EnvironmentProject>;
   commands: {
     link: CommandRunner<typeof threadEnvironment.linkPullRequest>;
@@ -81,7 +90,6 @@ export function createPullRequestLinking({
     updateMetadata: CommandRunner<typeof threadEnvironment.updateMetadata>;
   };
 }) {
-  const mode = threadPullRequestLinkMode(capabilities);
   const environmentProjects = projects.filter((project) => project.environmentId === environmentId);
   const canLink = (url: string) => {
     const parsed = parseChangeRequestUrl(url);
@@ -114,7 +122,8 @@ export function createPullRequestLinking({
       throw new Error("The pull request is not available in this environment.");
     const legacyProject = findProjectForChangeRequest(environmentProjects, parsed);
     const mutation = planThreadPullRequestMutation({
-      capabilities,
+      capabilities: appAtomRegistry.get(environmentServerConfigsAtom).get(threadRef.environmentId)
+        ?.environment.capabilities,
       threadId: threadRef.threadId,
       reference: { ...parsed, url },
       legacyProjectId: legacyProject?.id ?? null,

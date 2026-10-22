@@ -106,17 +106,17 @@ export function HelixPrControls({
     setReview(payload.review);
     return payload.review;
   }
-  async function run(operation: () => Promise<unknown>) {
-    if (busy) return;
+  function run(operation: () => Promise<unknown>): Promise<void> {
+    if (busy) return Promise.resolve();
     setBusy(true);
     setError(null);
-    try {
-      await operation();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setBusy(false);
-    }
+    return Promise.resolve()
+      .then(operation)
+      .then(
+        () => undefined,
+        (cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause)),
+      )
+      .finally(() => setBusy(false));
   }
   function remember(value: Outcome) {
     outcomes.set(key, value);
@@ -340,18 +340,22 @@ export function HelixPrControls({
                     }
                     if (outcomes.has(key)) return;
                     remember({ status: "submitting", revision: preview.revision, cleaned: false });
-                    try {
-                      const result = await submit({
-                        ...destination,
-                        input: {
-                          ...destination.input,
-                          ...helixPrReviewInput(preview, summary, verdict),
-                        },
-                      });
-                      if (result._tag === "Failure") throw squashAtomCommandFailure(result);
-                    } catch (cause) {
+                    const submitted = await submit({
+                      ...destination,
+                      input: {
+                        ...destination.input,
+                        ...helixPrReviewInput(preview, summary, verdict),
+                      },
+                    }).then(
+                      (result) =>
+                        result._tag === "Failure"
+                          ? { ok: false as const, cause: squashAtomCommandFailure(result) }
+                          : { ok: true as const },
+                      (cause: unknown) => ({ ok: false as const, cause }),
+                    );
+                    if (!submitted.ok) {
                       remember({ status: "uncertain", revision: preview.revision, cleaned: false });
-                      throw cause;
+                      throw submitted.cause;
                     }
                     remember({ status: "submitted", revision: preview.revision, cleaned: false });
                     await cleanup(preview.revision);

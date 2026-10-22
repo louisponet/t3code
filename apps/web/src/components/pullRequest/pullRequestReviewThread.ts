@@ -17,6 +17,7 @@ import {
   wasBootstrapThreadNotCreated,
 } from "@t3tools/client-runtime/errors";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import { threadPullRequestLinkMode } from "@t3tools/client-runtime/thread-pull-request-compatibility";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { useNavigate, useRouter } from "@tanstack/react-router";
 import { useSyncExternalStore } from "react";
@@ -132,7 +133,7 @@ export function usePullRequestReviewThread() {
     const config = appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId);
     const linking = createPullRequestLinking({
       environmentId,
-      capabilities: config?.environment.capabilities,
+      mode: threadPullRequestLinkMode(config?.environment.capabilities),
       projects: readProjects(),
       commands: { link, unlink, updateMetadata },
     });

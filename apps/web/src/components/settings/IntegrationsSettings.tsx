@@ -631,6 +631,30 @@ function PullRequestLinksOpenInAppSetting() {
   );
 }
 
+function HelixIntegrationSettings() {
+  const helixEnabled = useScopedSettings((settings) => settings.helixEnabled);
+  const updateSettings = useUpdateScopedSettings();
+
+  return (
+    <SettingsSection title="Helix">
+      <SettingsRow
+        serverScoped
+        settingKeys={["helixEnabled"]}
+        {...searchableSetting("helix")}
+        description="Edit source files and review diffs and pull requests in Helix instead of the built-in viewers. Requires a review-enabled Helix build and the hx-t3 launcher on this environment."
+        control={
+          <ScopedSwitch
+            settingKeys={["helixEnabled"]}
+            checked={helixEnabled}
+            onCheckedChange={(checked) => updateSettings({ helixEnabled: Boolean(checked) })}
+            aria-label="Use Helix"
+          />
+        }
+      />
+    </SettingsSection>
+  );
+}
+
 function DeviceIntegrationSettings() {
   const { search, environment: selected } = useSettingsScope();
   const settings = useScopedSettings();
@@ -1536,6 +1560,7 @@ export function IntegrationsSettingsPanel() {
         )}
         <PullRequestLinksOpenInAppSetting />
       </SettingsSection>
+      <HelixIntegrationSettings />
       <DeviceIntegrationSettings />
     </SettingsPageContainer>
   );

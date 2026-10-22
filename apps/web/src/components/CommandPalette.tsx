@@ -1910,6 +1910,7 @@ function OpenCommandPaletteDialog(props: {
 
   if (
     activeThread &&
+    activeThreadServerConfig?.settings.helixEnabled === true &&
     readEnvironmentScope(activeThread.environmentId, AuthTerminalReadScope) &&
     readEnvironmentScope(activeThread.environmentId, AuthTerminalOperateScope) &&
     (activeThreadPlatform === "linux" || activeThreadPlatform === "darwin")

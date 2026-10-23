@@ -20,6 +20,8 @@ describe("parseChangeRequestUrl", () => {
     });
     expect(changeRequestUrlFor("gathub", "gathub.gattaca.com", "repo", 10)).toBe(url);
     expect(parseChangeRequestUrl("http://gathub.gattaca.com/#pulls")).toBeNull();
+    for (const id of ["1e3", "0x10", "7.0", "%207", "0"])
+      expect(parseChangeRequestUrl(`http://gathub.gattaca.com/#pulls?id=${id}`)).toBeNull();
   });
 
   it("reads a GitHub pull request, lower-casing the repository", () => {

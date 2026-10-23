@@ -69,3 +69,23 @@ it.effect("keeps lookup failure out of generation and skips unlinked messages", 
     ),
   ),
 );
+
+it.effect("reads a GatHub pull request named in the hash of a plain HTTP link", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    yield* resolveThreadTitleLinks({
+      cwd: "/tmp/project",
+      message: "see http://gathub.gattaca.com/#pulls?id=7 and http://elsewhere.test/#pulls?id=8",
+    }).pipe(
+      Effect.provide(
+        layerRegistry({
+          resolveLink: ({ url }) => {
+            calls.push(url.href);
+            return Effect.succeed({ title: "Port routing", body: null });
+          },
+        }),
+      ),
+    );
+    expect(calls).toEqual(["http://gathub.gattaca.com/#pulls?id=7"]);
+  }),
+);

@@ -13,7 +13,10 @@ import {
   type SourceControlProviderDiscoveryItem,
 } from "@t3tools/contracts";
 import type {} from "@t3tools/contracts";
-import { detectSourceControlProviderFromRemoteUrl } from "@t3tools/shared/sourceControl";
+import {
+  detectSourceControlProviderFromRemoteUrl,
+  isGatHubHost,
+} from "@t3tools/shared/sourceControl";
 
 import * as BuiltInDrivers from "./builtInDrivers.ts";
 import * as SourceControlProvider from "@t3tools/source-control-core/server/SourceControlProvider";
@@ -334,7 +337,11 @@ export const makeWithProviders = Effect.fn("makeSourceControlProviderRegistryWit
 
     return SourceControlProviderRegistry.of({
       resolveLink: (input) => {
-        if (input.url.protocol !== "https:" || input.url.username || input.url.password) {
+        // GatHub is the one host served over plain HTTP, and only on the tailnet.
+        const secure =
+          input.url.protocol === "https:" ||
+          (input.url.protocol === "http:" && isGatHubHost(input.url.hostname));
+        if (!secure || input.url.username || input.url.password) {
           return undefined;
         }
         const kind = detectSourceControlProviderFromRemoteUrl(input.url.href)?.kind;

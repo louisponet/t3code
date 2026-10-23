@@ -49,6 +49,7 @@ export const GatHubPulls = Schema.Struct({
 });
 
 const GatHubCheck = Schema.Struct({
+  id: Schema.optional(Schema.Union([Schema.Int, Schema.String])),
   name: TrimmedNonEmptyString,
   status: Schema.String,
 });
@@ -71,7 +72,8 @@ const GatHubReview = Schema.Struct({
 });
 
 const GatHubFile = Schema.Struct({
-  path: TrimmedNonEmptyString,
+  // Kept as written: the patch names the same path, whitespace and all.
+  path: Schema.NonEmptyString,
   status: Schema.optional(Schema.String),
   // A file too large to show arrives with neither counts nor a patch.
   additions: Schema.NullOr(Schema.Int),
@@ -170,6 +172,21 @@ function reviewDecision(detail: GatHubPullDetail): PullRequestReviewDecision | n
   return status.approved_by.length > 0 ? "approved" : null;
 }
 
+/** A pull request's check is a CI run, whose page is GatHub's Actions view of that run. */
+export function toChecks(detail: GatHubPullDetail, host: string): ReadonlyArray<PullRequestCheck> {
+  return sortChecks(
+    detail.checks.map((check) => ({
+      name: check.name,
+      status: checkStatus(check.status),
+      description: null,
+      url:
+        check.id === undefined
+          ? null
+          : `http://${host}/#actions?${new URLSearchParams({ run: String(check.id) })}`,
+    })),
+  );
+}
+
 export function toViewerPermissions(detail: GatHubPullDetail): PullRequestViewerPermissions {
   const state = pullState(detail);
   return {
@@ -201,18 +218,14 @@ export function fileStats(detail: GatHubPullDetail) {
 }
 
 export function toDetail(detail: GatHubPullDetail, host: string): ProviderChangeRequestDetail {
-  const checks = sortChecks(
-    detail.checks.map((check) => ({
-      name: check.name,
-      status: checkStatus(check.status),
-      description: null,
-      url: null,
-    })),
-  );
+  const checks = toChecks(detail, host);
   const state = checksState(checks);
   const canMerge = detail.merge.can_merge && pullState(detail) === "open";
-  // A file too large to count would make any total a guess; 0/0 is shown as no count.
-  const counted = detail.files.every((file) => file.additions !== null && file.deletions !== null);
+  // A file too large to count, or a preview GatHub cut short at its size limit, would make any
+  // total a guess; 0/0 is shown as no count.
+  const counted =
+    !detail.files_truncated &&
+    detail.files.every((file) => file.additions !== null && file.deletions !== null);
   const files = counted ? fileStats(detail) : [];
   return {
     ...toChangeRequest(detail, host),

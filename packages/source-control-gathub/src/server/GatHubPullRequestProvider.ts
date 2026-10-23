@@ -9,6 +9,9 @@ import {
   type PullRequestProviderApi,
 } from "@t3tools/source-control-core/server/PullRequestProvider";
 
+import { parseDiffFileRevisions } from "@t3tools/source-control-core/server/diffFileRevisions";
+import { removeAgentCredits } from "@t3tools/source-control-core/server/mergeMessage";
+
 import * as GatHubApi from "./GatHubApi.ts";
 import * as Json from "./gatHubPullRequestJson.ts";
 import { definition } from "../client/definition.ts";
@@ -21,6 +24,8 @@ const CAPABILITIES: PullRequestCapabilities = {
   actions: [...definition.changeRequestActions],
   mergeMethods: ["squash"],
   search: false,
+  // GatHub keeps no viewed marks, so they live here, fenced on each file's blob in the patch.
+  viewedFiles: "environment",
   review: {
     inlineComment: false,
     reply: false,
@@ -123,6 +128,8 @@ export const make = Effect.gen(function* () {
   const provider: PullRequestProviderApi = {
     kind: KIND,
     capabilities: CAPABILITIES,
+    // GatHub squashes with the description as the message, where agents leave their credits.
+    mergeMessageRewrite: removeAgentCredits,
     getViewer: (input) =>
       read(
         "getViewer",
@@ -183,6 +190,29 @@ export const make = Effect.gen(function* () {
     getChangeRequestActivity: (input) => readDisplayed(input).pipe(Effect.map(Json.toActivity)),
     getViewerPermissions: (input) =>
       readPull("getViewerPermissions", input).pipe(Effect.map(Json.toViewerPermissions)),
+    getChangeRequestChecks: (input) =>
+      readPull("getChangeRequestChecks", input).pipe(
+        Effect.map((detail) => ({
+          state: Json.pullState(detail),
+          checks: Json.toChecks(detail, input.host),
+        })),
+      ),
+    // The patch names each file's blob; a file GatHub omits has none, so it is left unknown, and
+    // a path missing from a cut-short file list may still be in the change.
+    getFileRevisions: (input) =>
+      readDisplayed(input).pipe(
+        Effect.map((detail) => {
+          const revisions = new Map(parseDiffFileRevisions(Json.toDiff(detail).patch));
+          const listed = new Set(detail.files.map((file) => file.path));
+          if (!detail.files_truncated)
+            for (const path of input.paths) if (!listed.has(path)) revisions.set(path, "");
+          return {
+            revisions,
+            complete:
+              !detail.files_truncated && detail.files.every((file) => revisions.has(file.path)),
+          };
+        }),
+      ),
     getDiff: Effect.fn("GatHubPullRequestProvider.getDiff")(function* (input) {
       if (input.commit !== undefined)
         return yield* failure("getDiff", "GatHub shows a pull request's diff as a whole.");
@@ -192,7 +222,10 @@ export const make = Effect.gen(function* () {
       readDisplayed(input).pipe(
         Effect.map((detail) => ({
           files: Json.fileStats(detail),
-          truncated: detail.files_truncated,
+          // A file GatHub would not count makes the breakdown partial, like a cut-short list.
+          truncated:
+            detail.files_truncated ||
+            detail.files.some((file) => file.additions === null || file.deletions === null),
         })),
       ),
     runAction: Effect.fn("GatHubPullRequestProvider.runAction")(function* (input) {
@@ -204,7 +237,13 @@ export const make = Effect.gen(function* () {
             "merge",
             input,
             "/merge",
-            { title: pull.merge.default_title || pull.title, message: pull.body ?? "" },
+            {
+              title: pull.merge.default_title || pull.title,
+              message:
+                input.removeAgentCreditsOnMerge === true
+                  ? removeAgentCredits(pull.body ?? "")
+                  : (pull.body ?? ""),
+            },
             pull.head,
           );
           return;
@@ -214,6 +253,7 @@ export const make = Effect.gen(function* () {
           return yield* write(input.action, input, "/state", {
             state: input.action === "close" ? "closed" : "open",
           });
+        // GatHub's own page only ever sends a pull back to review, never to draft.
         case "ready":
           return yield* write("ready", input, "/draft", { draft: false });
         default:

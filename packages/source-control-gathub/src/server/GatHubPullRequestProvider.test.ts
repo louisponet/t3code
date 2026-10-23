@@ -133,7 +133,7 @@ const pull = {
   can_manage: true,
   body: "Body",
   can_review: true,
-  checks: [{ name: "ci.yml", status: "failed" }],
+  checks: [{ id: 41, name: "ci.yml", status: "failed" }],
   comments: [{ id: 3, author: "bm", body: "Looks fine", created_at: "2026-10-23 17:01:00" }],
   reviews: [
     { reviewer: "bm", state: "changes_requested", body: "Fix", created_at: "2026-10-23 17:01:30" },
@@ -145,7 +145,8 @@ const pull = {
       path: "a.rs",
       additions: 2,
       deletions: 1,
-      patch: "diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n@@ -1 +1,2 @@\n-x\n+y\n+z",
+      patch:
+        "diff --git a/a.rs b/a.rs\nindex 1111111..2222222 100644\n--- a/a.rs\n+++ b/a.rs\n@@ -1 +1,2 @@\n-x\n+y\n+z",
       truncated: false,
     },
     { path: "Cargo.lock", additions: null, deletions: null, patch: "", truncated: true },
@@ -167,12 +168,27 @@ describe("GatHubPullRequestProvider", () => {
       assert.deepStrictEqual([detail.additions, detail.deletions, detail.changedFiles], [0, 0, 2]);
       assert.strictEqual(detail.reviewDecision, "changes-requested");
       assert.strictEqual(detail.checksState, "failing");
+      assert.strictEqual(detail.checks[0]?.url, "http://gathub.gattaca.com/#actions?run=41");
       assert.deepStrictEqual(detail.mergeCapabilities, {
         merge: false,
         squash: true,
         rebase: false,
       });
       assert.deepStrictEqual(detail.viewerPermissions.actions, ["close", "merge"]);
+
+      // A viewed mark holds while a file's blob does; an omitted file's blob is unknown.
+      const revisions = yield* provider.getFileRevisions!({
+        ...target,
+        paths: ["a.rs", "Cargo.lock", "gone.rs"],
+      });
+      assert.deepStrictEqual(
+        [...revisions.revisions],
+        [
+          ["a.rs", "2222222"],
+          ["gone.rs", ""],
+        ],
+      );
+      assert.isFalse(revisions.complete);
 
       const diff = yield* provider.getDiff(target);
       // The file too large to show keeps its header, so the change still lists it.
@@ -186,6 +202,9 @@ describe("GatHubPullRequestProvider", () => {
         { path: "Cargo.lock", additions: 0, deletions: 0 },
       ]);
 
+      const stats = yield* provider.getFileStats!(target);
+      assert.isTrue(stats.truncated);
+
       const activity = yield* provider.getChangeRequestActivity(target);
       assert.deepStrictEqual(activity.commits, []);
       assert.strictEqual(fake.sent.length, 1);
@@ -196,6 +215,38 @@ describe("GatHubPullRequestProvider", () => {
           ["review", "changes_requested", "2026-10-23T17:01:30Z"],
         ],
       );
+    }).pipe(Effect.provide(fake.layer));
+  });
+
+  it.effect("keeps a file's path as written, so its blob still fences the viewed mark", () => {
+    const spaced = {
+      path: "a.rs ",
+      additions: 1,
+      deletions: 0,
+      patch:
+        'diff --git "a/a.rs " "b/a.rs "\nindex 1111111..3333333 100644\n--- "a/a.rs "\n+++ "b/a.rs "\n@@ -1 +1 @@\n-x\n+y',
+      truncated: false,
+    };
+    const fake = fakeGatHub({ "GET /api/pulls/7": { ...pull, files: [spaced] } });
+    return Effect.gen(function* () {
+      const provider = yield* GatHubPullRequestProvider.make;
+      const revisions = yield* provider.getFileRevisions!({ ...target, paths: ["a.rs "] });
+      assert.deepStrictEqual([...revisions.revisions], [["a.rs ", "3333333"]]);
+    }).pipe(Effect.provide(fake.layer));
+  });
+
+  it.effect("keeps a path missing from a cut-short file list unknown, not removed", () => {
+    const fake = fakeGatHub({
+      "GET /api/pulls/7": { ...pull, files: [pull.files[0]], files_truncated: true },
+    });
+    return Effect.gen(function* () {
+      const provider = yield* GatHubPullRequestProvider.make;
+      const revisions = yield* provider.getFileRevisions!({ ...target, paths: ["a.rs", "b.rs"] });
+      assert.deepStrictEqual([...revisions.revisions], [["a.rs", "2222222"]]);
+      assert.isFalse(revisions.complete);
+      // The listed files' lines are not the whole change's.
+      const detail = yield* provider.getChangeRequest(target);
+      assert.deepStrictEqual([detail.additions, detail.deletions], [0, 0]);
     }).pipe(Effect.provide(fake.layer));
   });
 

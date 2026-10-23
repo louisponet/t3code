@@ -296,6 +296,12 @@ it.effect(
         assert.ok(lookup);
         assert.deepStrictEqual(yield* lookup, expected);
       }
+      assert.ok(
+        registry.resolveLink({
+          cwd: "/unrelated",
+          url: new URL("http://gathub.gattaca.com/#pulls?id=1"),
+        }),
+      );
       for (const url of [
         "https://example.test/team/project/issues/1",
         "https://github.attacker.test/team/project/issues/1",
@@ -306,6 +312,10 @@ it.effect(
         "https://dev.azure.com/org/project/_git/repo/pullrequest/1",
         "http://github.com/team/project/issues/1",
         "https://user:secret@github.com/team/project/issues/1",
+        // Plain HTTP is GatHub's alone, and only on the host it names.
+        "http://gathub.attacker.test/#pulls?id=1",
+        "http://user:secret@gathub.gattaca.com/#pulls?id=1",
+        "http://gathub.gattaca.com/#code",
       ]) {
         assert.strictEqual(
           registry.resolveLink({ cwd: "/unrelated", url: new URL(url) }),

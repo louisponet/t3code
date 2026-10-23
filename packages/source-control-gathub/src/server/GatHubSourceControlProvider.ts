@@ -29,6 +29,7 @@ const Repository = Schema.Struct({
   default_branch: Schema.String,
   branches: Schema.Array(Schema.Struct({ name: Schema.String, head: Schema.String })),
 });
+const LinkSubject = Schema.Struct({ title: Schema.String, body: Schema.NullOr(Schema.String) });
 const decodeViewer = Schema.decodeEffect(
   Schema.fromJsonString(Schema.Struct({ user: Schema.String })),
 );
@@ -193,6 +194,24 @@ export const make = Effect.gen(function* () {
   return SourceControlProvider.SourceControlProvider.of({
     kind: KIND,
     repositoryNameFromRemoteUrl: (url) => parseGatHubRemote(url)?.repository ?? null,
+    // Names a thread after a GatHub pull request pasted into it. A title is a nicety, so the read
+    // gives up quickly.
+    resolveLink: ({ cwd, url }) => {
+      const number = isGatHubHost(url.hostname) ? gatHubPullRequestNumber(url) : null;
+      if (number === null) return undefined;
+      return read(
+        "resolveLink",
+        cwd,
+        { host: url.hostname.toLowerCase(), path: `/api/pulls/${number}` },
+        LinkSubject,
+      ).pipe(
+        Effect.timeout("3 seconds"),
+        Effect.mapError((cause) =>
+          error("resolveLink", cwd, "The linked pull request could not be read.", cause),
+        ),
+        Effect.map((pull) => ({ title: pull.title, body: pull.body })),
+      );
+    },
     getChangeRequest: getPull,
     listChangeRequests: Effect.fn("GatHubSourceControlProvider.listChangeRequests")(
       function* (input) {

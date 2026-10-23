@@ -69,8 +69,9 @@ export function gatHubPullRequestUrl(host: string, number: number): string {
 export function gatHubPullRequestNumber(url: URL): number | null {
   const [route, query = ""] = url.hash.replace(/^#/u, "").split("?", 2);
   if (route !== "pulls") return null;
-  const number = Number(new URLSearchParams(query).get("id"));
-  return Number.isSafeInteger(number) && number > 0 ? number : null;
+  const id = new URLSearchParams(query).get("id") ?? "";
+  const number = /^[1-9]\d*$/u.test(id) ? Number(id) : Number.NaN;
+  return Number.isSafeInteger(number) ? number : null;
 }
 
 function claim(host: string, match: RegExpExecArray | null): ChangeRequestLink | null {
@@ -128,12 +129,21 @@ export function changeRequestUrlFor(
   }
 }
 
-export function gitHubPullRequestBrowserUrl(
+/** Where to read a pull request the app could not load, on hosts whose page it can name. */
+export function pullRequestBrowserUrl(
   identity: RepositoryIdentity | null | undefined,
   repository: string,
   number: number,
 ): string | null {
-  if (identity?.provider !== "github" || !Number.isSafeInteger(number) || number < 1) return null;
+  if (!Number.isSafeInteger(number) || number < 1) return null;
+  if (identity?.provider === "gathub") {
+    // A GatHub page names only a number, so it is the right page only for GatHub's repository.
+    const host = identity.canonicalKey.split("/")[0];
+    return host && repository.toLowerCase() === GATHUB_REPOSITORY
+      ? gatHubPullRequestUrl(host, number)
+      : null;
+  }
+  if (identity?.provider !== "github") return null;
   const repositoryPath = repository.split("/");
   if (
     repositoryPath.length !== 2 ||

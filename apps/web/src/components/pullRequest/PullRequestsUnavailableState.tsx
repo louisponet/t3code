@@ -10,13 +10,13 @@ export function PullRequestsUnavailableState({
   error,
   onRetry,
   refreshing = false,
-  gitHubUrl,
+  hostLink,
 }: {
   title?: string;
   error: string;
   onRetry?: () => void;
   refreshing?: boolean;
-  gitHubUrl?: string;
+  hostLink?: { readonly url: string; readonly label: string };
 }) {
   return (
     <Empty className="scrollbar-gutter-both min-h-0 justify-center-safe overflow-y-auto [&>*]:shrink-0">
@@ -29,7 +29,7 @@ export function PullRequestsUnavailableState({
             shows its message rather than trying to infer one from the failure text. */}
         <EmptyDescription>{error}</EmptyDescription>
       </EmptyHeader>
-      {onRetry || gitHubUrl ? (
+      {onRetry || hostLink ? (
         <div className="flex flex-wrap justify-center gap-2">
           {onRetry ? (
             <Button
@@ -43,14 +43,14 @@ export function PullRequestsUnavailableState({
               Retry
             </Button>
           ) : null}
-          {gitHubUrl ? (
+          {hostLink ? (
             <Button
               size="sm"
               variant="outline"
-              render={<a href={gitHubUrl} target="_blank" rel="noopener noreferrer" />}
+              render={<a href={hostLink.url} target="_blank" rel="noopener noreferrer" />}
             >
               <ExternalLinkIcon aria-hidden className="size-3.5" />
-              Open on GitHub
+              Open on {hostLink.label}
             </Button>
           ) : null}
         </div>

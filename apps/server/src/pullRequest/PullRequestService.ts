@@ -1,5 +1,6 @@
 import {
   canonicalRepositoryKey,
+  isGatHubHost,
   isSshRemoteUrl,
   sourceControlRepositorySelector,
 } from "@t3tools/shared/sourceControl";
@@ -841,9 +842,11 @@ export const make = Effect.gen(function* () {
               onHost.find((candidate) => candidate.repositoryKey === null);
             if (route === undefined) {
               return Effect.gen(function* () {
-                const provider = ["github.com", "bitbucket.org", "codeberg.org"].includes(host)
-                  ? detectSourceControlProviderFromRemoteUrl(`https://${host}/${repository}.git`)
-                  : null;
+                const provider =
+                  ["github.com", "bitbucket.org", "codeberg.org"].includes(host) ||
+                  isGatHubHost(host)
+                    ? detectSourceControlProviderFromRemoteUrl(`https://${host}/${repository}.git`)
+                    : null;
                 const api = provider === null ? null : registry.get(provider.kind);
                 if (api !== null) {
                   const selected = yield* projects.getShell(ref.projectId).pipe(

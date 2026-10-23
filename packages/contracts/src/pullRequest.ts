@@ -919,6 +919,14 @@ const PROVIDER_REQUIREMENT = new Map<
     },
   ],
   [
+    "gathub",
+    {
+      missing: "GatHub uses the token git pushes with, and git is not available on the server.",
+      unauthenticated:
+        "Git has no GatHub credential on the server. Push once over HTTP with your GatHub token so git's credential helper stores it.",
+    },
+  ],
+  [
     "bitbucket",
     {
       missing:

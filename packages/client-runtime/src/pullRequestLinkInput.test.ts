@@ -116,6 +116,11 @@ describe("parsePullRequestReference", () => {
     ).toBe("https://acme.visualstudio.com/project/_git/t3code/pullrequest/42");
   });
 
+  it("accepts GatHub pull request URLs, which name the number in the hash", () => {
+    const url = "http://gathub.gattaca.com/#pulls?id=7";
+    expect(parsePullRequestReference(url)).toBe(url);
+  });
+
   it("accepts gh pr checkout commands with raw numbers", () => {
     expect(parsePullRequestReference("gh pr checkout 42")).toBe("42");
   });

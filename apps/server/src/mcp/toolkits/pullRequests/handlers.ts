@@ -12,8 +12,12 @@ import {
   type ThreadPullRequestKey,
   type ThreadPullRequestLink,
 } from "@t3tools/contracts";
-import { changeRequestUrlFor, parseChangeRequestUrl } from "@t3tools/shared/changeRequestUrl";
-import { sourceControlRepositorySelector } from "@t3tools/shared/sourceControl";
+import {
+  changeRequestUrlFor,
+  GATHUB_REPOSITORY,
+  parseChangeRequestUrl,
+} from "@t3tools/shared/changeRequestUrl";
+import { isGatHubHost, sourceControlRepositorySelector } from "@t3tools/shared/sourceControl";
 import {
   normalizeThreadPullRequestKey,
   resolveThreadPullRequestChains,
@@ -92,10 +96,11 @@ const resolveTarget = Effect.fn("PullRequestsToolkit.resolveTarget")(function* (
   if (host === undefined) {
     return yield* new PullRequestHostRequiredError({});
   }
-  const repository = input.repository.toLowerCase();
+  // A GatHub host serves one repository, whatever name the caller gave it.
+  const repository = isGatHubHost(host) ? GATHUB_REPOSITORY : input.repository.toLowerCase();
   const url =
     changeRequestUrlFor(
-      host === projectHost.host ? projectHost.kind : null,
+      isGatHubHost(host) ? "gathub" : host === projectHost.host ? projectHost.kind : null,
       host,
       repository,
       input.number,

@@ -6,6 +6,8 @@ import * as BitbucketPullRequestApi from "@t3tools/source-control-bitbucket/serv
 import * as BitbucketDriver from "@t3tools/source-control-bitbucket/server/driver";
 import * as ForgejoCli from "@t3tools/source-control-forgejo/server/ForgejoCli";
 import * as ForgejoDriver from "@t3tools/source-control-forgejo/server/driver";
+import * as GatHubApi from "@t3tools/source-control-gathub/server/GatHubApi";
+import * as GatHubDriver from "@t3tools/source-control-gathub/server/driver";
 import * as GitCafeApi from "@t3tools/source-control-gitcafe/server/GitCafeApi";
 import * as GitCafeCredentials from "@t3tools/source-control-gitcafe/server/GitCafeCredentials";
 import * as GitCafeDriver from "@t3tools/source-control-gitcafe/server/driver";
@@ -27,6 +29,7 @@ const drivers = [
   BitbucketDriver.driver,
   ForgejoDriver.driver,
   GitCafeDriver.driver,
+  GatHubDriver.driver,
 ];
 
 export type BuiltInSourceControlDriversEnv =
@@ -43,6 +46,7 @@ export const layer = Layer.mergeAll(
   AzureDevOpsPullRequestCli.layer.pipe(Layer.provideMerge(AzureDevOpsCli.layer)),
   BitbucketPullRequestApi.layer.pipe(Layer.provideMerge(BitbucketApi.layer)),
   ForgejoCli.layer,
+  GatHubApi.layer,
   GitCafeApi.layer.pipe(Layer.provideMerge(GitCafeCredentials.layer)),
   GitLabPullRequestCli.layer.pipe(Layer.provideMerge(GitLabCli.layer)),
 ).pipe(Layer.provideMerge(ServerSourceControlHost.layer));

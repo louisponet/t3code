@@ -1,5 +1,5 @@
 import type { RepositoryIdentity, ThreadLinkedPullRequest } from "@t3tools/contracts";
-import { canonicalRepositoryKey } from "./sourceControl.ts";
+import { canonicalRepositoryKey, isGatHubHost } from "./sourceControl.ts";
 
 /**
  * The two strings are what `pullRequestHostOf` and the project's `repositoryIdentity` produce
@@ -28,6 +28,11 @@ export function parseChangeRequestUrl(targetUrl: string): ChangeRequestLink | nu
   if (url.protocol !== "https:" && url.protocol !== "http:") return null;
   const host = url.hostname.toLowerCase();
 
+  if (isGatHubHost(host)) {
+    const number = gatHubPullRequestNumber(url);
+    return number === null ? null : { host, repository: GATHUB_REPOSITORY, number };
+  }
+
   if (host === "git.cafe" || host === "staging.git.cafe") {
     const match = /^\/([^/]+\/[^/]+)\/pulls\/(\d+)(?:\/|$)/u.exec(url.pathname);
     if (match) return claim(host, match);
@@ -52,6 +57,20 @@ export function parseChangeRequestUrl(targetUrl: string): ChangeRequestLink | nu
   const azure = /^\/((?:[^/]+\/)*_git\/[^/]+)\/pullrequest\/(\d+)(?:\/|$)/u.exec(url.pathname);
   const link = claim(host, azure);
   return link === null || url.port === "" ? link : { ...link, authority: url.host.toLowerCase() };
+}
+
+/** A GatHub host serves one repository, and its pull request pages name only the number. */
+export const GATHUB_REPOSITORY = "repo";
+
+export function gatHubPullRequestUrl(host: string, number: number): string {
+  return `http://${host}/#pulls?id=${number}`;
+}
+
+export function gatHubPullRequestNumber(url: URL): number | null {
+  const [route, query = ""] = url.hash.replace(/^#/u, "").split("?", 2);
+  if (route !== "pulls") return null;
+  const number = Number(new URLSearchParams(query).get("id"));
+  return Number.isSafeInteger(number) && number > 0 ? number : null;
 }
 
 function claim(host: string, match: RegExpExecArray | null): ChangeRequestLink | null {
@@ -90,6 +109,8 @@ export function changeRequestUrlFor(
       return `https://${host}/${repository}/pull/${number}`;
     case "gitcafe":
       return `https://${host}/${repository}/pulls/${number}`;
+    case "gathub":
+      return gatHubPullRequestUrl(host, number);
     case "forgejo":
       return `${remoteWebOrigin(host, remoteUrl)}/${repository}/pulls/${number}`;
     case "gitlab":

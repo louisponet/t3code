@@ -1,6 +1,6 @@
 # Source control
 
-T3 Code integrates with GitHub, GitLab, Forgejo, Gitea, Bitbucket, Azure DevOps, and GitCafe to clone
+T3 Code integrates with GitHub, GitLab, Forgejo, Gitea, Bitbucket, Azure DevOps, GitCafe, and GatHub to clone
 and publish repositories, create pull requests, and review changes.
 
 ## Review turn changes
@@ -118,6 +118,17 @@ sent to `git.cafe`; `CAFE_TOKEN` follows `CAFE_HOST` if you set it. Repositories
 
 Line comments are not available for GitCafe pull requests yet.
 Merging a stack lands it through GitCafe, and updating a branch restacks the layers above it.
+
+### GatHub
+
+GatHub needs no separate sign-in. T3 Code uses the token that git already uses for the remote, so
+a project cloned from `http://gathub.gattaca.com/repo.git` works once git can fetch and push
+without asking for a password. If T3 Code reports that git has no credential, store the GatHub
+token with git's credential helper, for example by pushing once from a terminal.
+
+GatHub pull requests always merge into the default branch by squashing. Line comments, review
+threads, reactions, reviewer requests, per-commit diffs, and editing a pull request's title or
+description are not available in T3 Code.
 
 ## Start, clone, or publish a project
 

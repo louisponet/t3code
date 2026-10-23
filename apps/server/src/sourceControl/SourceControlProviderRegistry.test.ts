@@ -37,6 +37,7 @@ import * as GitHubCredentials from "@t3tools/source-control-github/server/GitHub
 import * as GitLabCli from "@t3tools/source-control-gitlab/server/GitLabCli";
 import * as GitLabPullRequestCli from "@t3tools/source-control-gitlab/server/GitLabPullRequestCli";
 import * as ForgejoCli from "@t3tools/source-control-forgejo/server/ForgejoCli";
+import * as GatHubApi from "@t3tools/source-control-gathub/server/GatHubApi";
 import * as GitCafeApi from "@t3tools/source-control-gitcafe/server/GitCafeApi";
 import * as GitCafeCredentials from "@t3tools/source-control-gitcafe/server/GitCafeCredentials";
 import * as SourceControlProviderRegistry from "./SourceControlProviderRegistry.ts";
@@ -154,6 +155,7 @@ function makeRegistry(input: {
           listLogins: () => Effect.succeed([]),
           ...input.forgejo,
         }),
+        Layer.mock(GatHubApi.GatHubApi)({}),
         Layer.mock(GitCafeApi.GitCafeApi)({}),
         Layer.mock(GitCafeCredentials.GitCafeCredentials)({
           cliEnv: () => Effect.succeed({}),

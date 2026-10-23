@@ -8,6 +8,12 @@ import {
 } from "./sourceControl.ts";
 
 describe("detectSourceControlProviderFromRemoteUrl", () => {
+  it("detects GatHub, which serves its one repository over plain HTTP", () => {
+    expect(
+      detectSourceControlProviderFromRemoteUrl("http://lopo@gathub.gattaca.com/repo.git"),
+    ).toEqual({ kind: "gathub", name: "GatHub", baseUrl: "http://gathub.gattaca.com" });
+  });
+
   it("detects Forgejo and Gitea hosts while preserving HTTP origins", () => {
     for (const host of ["codeberg.org", "forgejo.example.test", "gitea.example.test"]) {
       expect(detectSourceControlProviderFromRemoteUrl(`http://${host}:3000/team/repo.git`)).toEqual(

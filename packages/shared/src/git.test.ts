@@ -63,6 +63,12 @@ describe("normalizeGitRemoteUrl", () => {
     expect(normalizeGitRemoteUrl("git@x:team/project.git")).toBe("x/team/project");
   });
 
+  it("keys a repository served at the root of its host", () => {
+    expect(normalizeGitRemoteUrl("http://lopo@gathub.gattaca.com/repo.git")).toBe(
+      "gathub.gattaca.com/repo",
+    );
+  });
+
   it("gives an Azure DevOps repository the same key over SSH as over HTTPS", () => {
     expect(normalizeGitRemoteUrl("git@ssh.dev.azure.com:v3/T3Tools/Platform/T3Code")).toBe(
       "dev.azure.com/t3tools/platform/_git/t3code",

@@ -1,5 +1,8 @@
 import { usePullRequestConnected } from "./usePullRequestConnected";
-import { useAtomValue } from "@effect/atom-react";
+import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
+import { AsyncResult } from "effect/reactivity";
+import * as Dialog from "../../components/ui/Dialog";
+import { useAtomCommand } from "../../state/use-atom-command";
 import { useNavigation } from "@react-navigation/native";
 import type { PullRequestAction, PullRequestDetail } from "@t3tools/contracts";
 import Animated from "react-native-reanimated";
@@ -100,6 +103,30 @@ export function PullRequestChecksRow(props: RowProps) {
   const [expanded, setExpanded] = useState(false);
   const checks = pullRequestChecksSummary(props.pr);
   const action = usePullRequestAction(props.params, props.pr);
+  const target = pullRequestTarget(props.params);
+  const cancelCheck = useAtomCommand(composerPullRequests.cancelCheck, { reportFailure: false });
+  const refreshDetail = useAtomRefresh(composerPullRequests.detail(target));
+  const canWriteChecks = useAtomValue(
+    composerPullRequests.cancelCheck.permissionAtom(target.environmentId),
+  );
+  const connected = usePullRequestConnected(target.environmentId);
+  const canCancel = canWriteChecks && connected && props.pr.capabilities.cancelChecks === true;
+  const confirmCancel = (name: string, runId: string) =>
+    Dialog.alert("Cancel run", `Stop ${name}? Its jobs end where they are.`, [
+      { text: "Keep running", style: "cancel" },
+      {
+        text: "Cancel run",
+        style: "destructive",
+        onPress: () =>
+          void cancelCheck({ ...target, input: { ...target.input, runId } }).then((response) => {
+            if (AsyncResult.isFailure(response)) {
+              Dialog.alert("Couldn't cancel this run", "Try again.");
+              return;
+            }
+            refreshDetail();
+          }),
+      },
+    ]);
   return (
     <Animated.View layout={PR_ROW_LAYOUT}>
       <PullRequestCardRow
@@ -142,16 +169,25 @@ export function PullRequestChecksRow(props: RowProps) {
             .map((check) => {
               const status = checkStatus(check);
               const url = check.url;
+              const runId = check.runId;
               return (
-                <PullRequestCardRow
-                  key={`${check.name}:${url}`}
-                  title={check.name}
-                  icon={status.icon}
-                  tint={status.tint}
-                  value={status.label}
-                  detail={check.description ?? undefined}
-                  onPress={url ? () => void Linking.openURL(url) : undefined}
-                />
+                <View key={`${check.name}:${url}`}>
+                  <PullRequestCardRow
+                    title={check.name}
+                    icon={status.icon}
+                    tint={status.tint}
+                    value={status.label}
+                    detail={check.description ?? undefined}
+                    onPress={url ? () => void Linking.openURL(url) : undefined}
+                  />
+                  {canCancel && check.canCancel === true && runId !== undefined ? (
+                    <PullRequestCardRow
+                      title="Cancel run"
+                      icon="stop.fill"
+                      onPress={() => confirmCancel(check.name, runId)}
+                    />
+                  ) : null}
+                </View>
               );
             })}
           {!props.pr.checks.length ? (

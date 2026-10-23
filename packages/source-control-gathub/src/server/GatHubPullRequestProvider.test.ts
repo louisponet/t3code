@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as TestClock from "effect/testing/TestClock";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -44,17 +45,21 @@ function fakeGatHub(
     };
     sent.push(entry);
     const route = routes[`${entry.method} ${entry.path}`];
+    // A route given as a function answers each request in turn, a `Response` as it is.
+    const answer = typeof route === "function" ? (route as () => unknown)() : route;
     return Effect.succeed(
       HttpClientResponse.fromWeb(
         request,
-        route === undefined
-          ? new Response("{}", { status: 404 })
-          : new Response(encodeJson(route), { status: 200 }),
+        answer instanceof Response
+          ? answer
+          : answer === undefined
+            ? new Response("{}", { status: 404 })
+            : new Response(encodeJson(answer), { status: 200 }),
       ),
     );
   });
   const layer = GatHubApi.layer.pipe(
-    Layer.provide(
+    Layer.provideMerge(
       TestSourceControlHost.layer({
         git: {
           // GatHub is not the primary remote: the credential is still asked of its own URL.
@@ -232,6 +237,158 @@ describe("GatHubPullRequestProvider", () => {
       const provider = yield* GatHubPullRequestProvider.make;
       const revisions = yield* provider.getFileRevisions!({ ...target, paths: ["a.rs "] });
       assert.deepStrictEqual([...revisions.revisions], [["a.rs ", "3333333"]]);
+    }).pipe(Effect.provide(fake.layer));
+  });
+
+  it.effect("offers to cancel only the runs GatHub says this viewer may stop", () => {
+    const fake = fakeGatHub({
+      "GET /api/pulls/7": {
+        ...pull,
+        checks: [
+          { id: 50, name: "ci.yml", status: "running" },
+          { id: 51, name: "lint.yml", status: "queued" },
+          { id: 41, name: "old.yml", status: "failed" },
+        ],
+      },
+      "GET /api/ci/runs/50": { can_cancel: true },
+      "GET /api/ci/runs/51": { can_cancel: false },
+      "GET /api/identity": { user: "lopo", identity_key: "key-1" },
+      "POST /api/ci/runs/50/cancel": {},
+    });
+    return Effect.gen(function* () {
+      const provider = yield* GatHubPullRequestProvider.make;
+      const detail = yield* provider.getChangeRequest(target);
+      assert.deepStrictEqual(
+        detail.checks.map((check) => [check.runId, check.canCancel ?? false]),
+        [
+          ["41", false],
+          ["50", true],
+          ["51", false],
+        ],
+      );
+      // A finished run is never asked about.
+      assert.isFalse(fake.sent.some((request) => request.path === "/api/ci/runs/41"));
+      yield* provider.cancelCheck!({ ...target, runId: "50" });
+      assert.deepStrictEqual(fake.sent.at(-1), {
+        method: "POST",
+        path: "/api/ci/runs/50/cancel",
+        identity: "key-1",
+        body: {},
+      });
+      const runReads = () => fake.sent.filter((request) => request.path === "/api/ci/runs/50");
+      assert.strictEqual(runReads().length, 1);
+      // A run still stopping after a cancel is asked again, not offered the old answer.
+      yield* provider.getChangeRequest(target);
+      assert.strictEqual(runReads().length, 2);
+    }).pipe(Effect.provide(fake.layer));
+  });
+
+  it.effect("lists only the pull requests that touch a project's directory", () => {
+    const sha = (fill: string, id: number) => `${fill.repeat(38)}${String(id).padStart(2, "0")}`;
+    const row = (id: number, updated: string) => ({
+      ...pull,
+      id,
+      head: sha("a", id),
+      updated_at: updated,
+    });
+    const file = (path: string) => ({ ...pull.files[0], path });
+    const fake = fakeGatHub({
+      "GET /api/pulls": {
+        pulls: [
+          row(7, "2026-10-23 17:00:00"),
+          row(8, "2026-10-23 16:00:00"),
+          row(9, "2026-10-23 15:00:00"),
+          row(10, "2026-10-23 14:00:00"),
+          row(11, "2026-10-23 13:00:00"),
+        ],
+        pulls_truncated: false,
+      },
+      "GET /api/pulls/7": { ...row(7, "2026-10-23 17:00:00"), files: [file("javelin/src/lib.rs")] },
+      "GET /api/pulls/8": { ...row(8, "2026-10-23 16:00:00"), files: [file("builder/main.rs")] },
+      // Cut short before javelin/: GatHub's own list decides, the same for every project.
+      "GET /api/pulls/9": {
+        ...row(9, "2026-10-23 15:00:00"),
+        files: [file("builder/a.rs")],
+        files_truncated: true,
+      },
+      // Moved out of javelin/: the rename touches javelin/ too.
+      "GET /api/pulls/10": {
+        ...row(10, "2026-10-23 14:00:00"),
+        files: [
+          file("javelinx/a.rs"),
+          {
+            ...file("builder/moved.rs"),
+            patch:
+              "diff --git a/javelin/moved.rs b/builder/moved.rs\nsimilarity index 100%\nrename from javelin/moved.rs\nrename to builder/moved.rs",
+          },
+        ],
+      },
+      // The deeper directory wins, by path segments rather than characters.
+      "GET /api/pulls/11": {
+        ...row(11, "2026-10-23 13:00:00"),
+        files: [file("javelin/x.rs"), file("a/b/c.rs")],
+      },
+    });
+    return Effect.gen(function* () {
+      const provider = yield* GatHubPullRequestProvider.make;
+      const list = (limit: number, pathScope?: string) =>
+        provider
+          .listChangeRequests({
+            ...target,
+            state: "all",
+            involvement: "all",
+            viewer: "lopo",
+            limit,
+            pathScopes: ["javelin", "a/b"],
+            ...(pathScope === undefined ? {} : { pathScope }),
+          })
+          .pipe(Effect.map((page) => page.items.map((item) => item.number)));
+      // The lists of one poll run together and share each pull's one read.
+      const [javelin, deep, root] = yield* Effect.all(
+        [list(10, "javelin"), list(10, "a/b"), list(10)],
+        { concurrency: "unbounded" },
+      );
+      assert.deepStrictEqual(javelin, [7, 10]);
+      assert.deepStrictEqual(deep, [11]);
+      assert.deepStrictEqual(root, [8, 9]);
+      assert.strictEqual(fake.sent.filter((request) => request.path === "/api/pulls/7").length, 1);
+      // What a pull changes is held for its head, so the next poll asks nothing again.
+      const reads = fake.sent.length;
+      assert.deepStrictEqual(yield* list(1, "javelin"), [7]);
+      assert.strictEqual(fake.sent.length, reads + 1);
+    }).pipe(Effect.provide(fake.layer));
+  });
+
+  it.effect("gives every list of a poll the same answer when a pull's read fails", () => {
+    let reads = 0;
+    const touching = { ...pull, files: [{ ...pull.files[0], path: "javelin/lib.rs" }] };
+    const fake = fakeGatHub({
+      "GET /api/pulls": { pulls: [pull], pulls_truncated: false },
+      "GET /api/pulls/7": () => (++reads === 1 ? new Response("{}", { status: 500 }) : touching),
+    });
+    return Effect.gen(function* () {
+      const provider = yield* GatHubPullRequestProvider.make;
+      const list = (pathScope?: string) =>
+        provider
+          .listChangeRequests({
+            ...target,
+            state: "all",
+            involvement: "all",
+            viewer: "lopo",
+            limit: 10,
+            pathScopes: ["javelin"],
+            ...(pathScope === undefined ? {} : { pathScope }),
+          })
+          .pipe(Effect.map((page) => page.items.map((item) => item.number)));
+      // The read failed, so the pull stays on the root's list for both, not on both or neither.
+      assert.deepStrictEqual(yield* list("javelin"), []);
+      assert.deepStrictEqual(yield* list(), [7]);
+      assert.strictEqual(reads, 1);
+      // A later poll asks again.
+      yield* TestClock.adjust("11 seconds");
+      assert.deepStrictEqual(yield* list("javelin"), [7]);
+      assert.deepStrictEqual(yield* list(), []);
+      assert.strictEqual(reads, 2);
     }).pipe(Effect.provide(fake.layer));
   });
 

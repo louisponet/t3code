@@ -57,6 +57,12 @@ describe("RPC authorization scopes", () => {
     );
   });
 
+  it("requires source control writes to cancel a pull request's check run", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.pullRequestsCancelCheck)).toBe(
+      AuthSourceControlWriteScope,
+    );
+  });
+
   it("separates passive terminal observation from operations that can change a shell", () => {
     for (const method of [
       WS_METHODS.terminalObserve,

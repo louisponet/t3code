@@ -2,6 +2,7 @@ import { SourceControlProviderKind } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  repositoryPathScope,
   sourceControlRepositorySelector,
   detectSourceControlProviderFromRemoteUrl,
   getChangeRequestTerminologyForKind,
@@ -174,4 +175,14 @@ it("keeps a GitLab identity's whole path, because a nested group is part of the 
     name: "service",
   });
   expect(selector).toBe("group/subgroup/service");
+});
+
+it("places a project inside its repository by the directory it opens", () => {
+  expect(repositoryPathScope("/repo", "/repo/javelin/")).toBe("javelin");
+  expect(repositoryPathScope("/repo", "/repo")).toBe(null);
+  expect(repositoryPathScope("/repo", "/repository")).toBe(null);
+  expect(repositoryPathScope(undefined, "/repo/javelin")).toBe(null);
+  // Git's root and a stored project path can spell a Windows path with either separator.
+  expect(repositoryPathScope("C:/repo", "C:\\repo")).toBe(null);
+  expect(repositoryPathScope("C:/repo", "C:\\repo\\javelin")).toBe("javelin");
 });

@@ -41,4 +41,5 @@ export const definition = defineSourceControlClient({
   canReadChangeRequestOnHost: (identity, link) =>
     isChangeRequestOnProjectHost(KIND, identity, link),
   isChangeRequestUrl: (url) => isGatHubPullRequestUrl(url),
+  pathScopedLists: true,
 });

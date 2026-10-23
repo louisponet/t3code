@@ -582,6 +582,13 @@ export function createPullRequestEnvironmentAtoms<R, E>(
       scheduler: commandScheduler,
       concurrency: serialPerEnvironment,
     }),
+    cancelCheck: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:pull-requests:cancel-check",
+      tag: WS_METHODS.pullRequestsCancelCheck,
+      execute: (input) => routedRequest(WS_METHODS.pullRequestsCancelCheck, input),
+      scheduler: commandScheduler,
+      concurrency: serialPerEnvironment,
+    }),
     setReaction: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:pull-requests:set-reaction",
       tag: WS_METHODS.pullRequestsSetReaction,

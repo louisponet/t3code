@@ -6,6 +6,7 @@ import { assert, expect, it } from "@effect/vitest";
 import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
@@ -273,6 +274,7 @@ function makeService(input: {
           resolve: input.resolveRepositoryIdentity ?? (() => Effect.succeed(null)),
         }),
         SourceControlRateLimit.layer,
+        NodeServices.layer,
         PullRequestFilesViewed.layer.pipe(Layer.provide(SqlitePersistence.layerMemory)),
         Layer.effect(PullRequestReadCache.PullRequestReadCache, PullRequestReadCache.make).pipe(
           Layer.provide(KeyValueStore.layerMemory),
@@ -4181,4 +4183,92 @@ it.effect("expands only files the change request changes, across every slice of 
     assert.strictEqual(halfRename._tag, "PullRequestOperationError");
     assert.deepStrictEqual(read, ["src/old.ts->src/new.ts", "gone.md->gone.md"]);
   }),
+);
+
+it.effect("lists a monorepo directory's pull requests under its own project", () =>
+  Effect.gen(function* () {
+    const inRepo = (id: string, workspaceRoot: string): OrchestrationProjectShell => {
+      const shell = project({
+        id,
+        title: id,
+        workspaceRoot,
+        repository: "repo",
+        provider: "gathub",
+        host: "gathub.gattaca.com",
+        remoteUrl: "http://gathub.gattaca.com/repo.git",
+      });
+      return { ...shell, repositoryIdentity: { ...shell.repositoryIdentity!, rootPath: "/repo" } };
+    };
+    const scopes: Array<readonly [string | undefined, ReadonlyArray<string> | undefined]> = [];
+    const gatHub = fakeProvider(SourceControlProviderKind.make("gathub"), {
+      pathScopedLists: true,
+      listChangeRequests: (input) => {
+        scopes.push([input.pathScope, input.pathScopes]);
+        // The provider owns the partition: each pull is on exactly one project's list.
+        const numbers = input.pathScope === "javelin" ? [1] : [2];
+        return Effect.succeed({
+          items: numbers.map((number) => changeRequest(number, "2026-07-02T00:00:00Z")),
+          truncated: false,
+          continues: false,
+        });
+      },
+    });
+    const service = yield* makeService({
+      projects: [inRepo("root", "/repo"), inRepo("javelin", "/repo/javelin")],
+      providers: [gatHub],
+    });
+    const result = yield* service.list({ state: "open" });
+    assert.deepStrictEqual(
+      scopes.toSorted(([a], [b]) => String(a).localeCompare(String(b))),
+      [
+        ["javelin", ["javelin"]],
+        [undefined, ["javelin"]],
+      ],
+    );
+    assert.deepStrictEqual(
+      result.entries.map((entry) => [entry.number, entry.projectId]).toSorted(),
+      [
+        [1, "javelin"],
+        [2, "root"],
+      ],
+    );
+  }),
+);
+
+it.effect("places a directory project opened through a symlink inside its repository", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const base = yield* fs.realPath(yield* fs.makeTempDirectoryScoped({ prefix: "t3-scope-" }));
+    yield* fs.makeDirectory(`${base}/repo/javelin`, { recursive: true });
+    yield* fs.symlink(`${base}/repo`, `${base}/alias`);
+    const shell = project({
+      id: "javelin",
+      title: "javelin",
+      workspaceRoot: `${base}/alias/javelin`,
+      repository: "repo",
+      provider: "gathub",
+      host: "gathub.gattaca.com",
+      remoteUrl: "http://gathub.gattaca.com/repo.git",
+    });
+    const scopes: Array<string | undefined> = [];
+    const gatHub = fakeProvider(SourceControlProviderKind.make("gathub"), {
+      pathScopedLists: true,
+      listChangeRequests: (input) => {
+        scopes.push(input.pathScope);
+        return Effect.succeed({ items: [], truncated: false, continues: false });
+      },
+    });
+    const service = yield* makeService({
+      projects: [
+        {
+          ...shell,
+          // Git reports the checkout's root with the symlink resolved.
+          repositoryIdentity: { ...shell.repositoryIdentity!, rootPath: `${base}/repo` },
+        },
+      ],
+      providers: [gatHub],
+    });
+    yield* service.list({ state: "open" });
+    assert.deepStrictEqual(scopes, ["javelin"]);
+  }).pipe(Effect.provide(NodeServices.layer)),
 );

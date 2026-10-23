@@ -1,6 +1,9 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 
-import type { AssignableProject } from "./pullRequestProjectAssignment.logic";
+import {
+  pullRequestDirectoryOf,
+  type AssignableProject,
+} from "./pullRequestProjectAssignment.logic";
 
 interface FilterProject extends AssignableProject {
   readonly title: string;
@@ -32,7 +35,9 @@ export function pullRequestFilterProjects<Project extends FilterProject>(
     const repository = project.repositoryIdentity?.canonicalKey?.toLowerCase();
     const key = JSON.stringify([
       project.environmentId,
-      repository ? ["repository", repository] : ["project", project.id],
+      repository
+        ? ["repository", repository, pullRequestDirectoryOf(project)]
+        : ["project", project.id],
     ]);
     const selected =
       project.id === selectedProject?.id && project.environmentId === selectedProject.environmentId;

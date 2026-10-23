@@ -112,3 +112,32 @@ describe("pull request project filter choices", () => {
     ]);
   });
 });
+
+describe("pull request project filter choices for directory-listing hosts", () => {
+  it("keeps a monorepo directory's project apart from its repository's root", () => {
+    const inRepo = (id: string, workspaceRoot: string, provider: string) => ({
+      ...project(id, nucbox, "gathub.gattaca.com/repo"),
+      title: id,
+      workspaceRoot,
+      repositoryIdentity: { canonicalKey: "gathub.gattaca.com/repo", provider, rootPath: "/repo" },
+    });
+    const gatHub = pullRequestFilterProjects(
+      [inRepo("root", "/repo", "gathub"), inRepo("javelin", "/repo/javelin", "gathub")],
+      labels,
+    );
+    expect(gatHub.map(({ id }) => id)).toEqual(["javelin", "root"]);
+    // A host that lists the whole repository for each of them still offers one choice.
+    const gitHub = pullRequestFilterProjects(
+      [inRepo("root", "/repo", "github"), inRepo("javelin", "/repo/javelin", "github")],
+      labels,
+    );
+    expect(gitHub).toHaveLength(1);
+    // Opened through a symlink, the directory cannot be placed in the repository here, so it
+    // stays its own choice instead of hiding behind the root.
+    const linked = pullRequestFilterProjects(
+      [inRepo("root", "/repo", "gathub"), inRepo("javelin", "/alias/javelin", "gathub")],
+      labels,
+    );
+    expect(linked.map(({ id }) => id)).toEqual(["javelin", "root"]);
+  });
+});

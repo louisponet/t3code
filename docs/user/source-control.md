@@ -126,6 +126,16 @@ a project cloned from `http://gathub.gattaca.com/repo.git` works once git can fe
 without asking for a password. If T3 Code reports that git has no credential, store the GatHub
 token with git's credential helper, for example by pushing once from a terminal.
 
+GatHub serves one repository whose top-level directories are separate projects. Add a directory,
+such as `repo/solana-builder`, as its own T3 Code project to see only the pull requests that change
+files in it. Listing all projects together shows each pull request once, under the deepest
+project directory it changes (the alphabetically first among equals), or under the root project
+when it changes none. Filtering the list to a project shows every pull request that changes files
+in it, and filtering to the root project shows all of them.
+
+A check that is still running can be cancelled from the pull request's **Checks** section when
+GatHub allows it. GatHub cannot re-run a check.
+
 GatHub pull requests always merge into the default branch by squashing. Line comments, review
 threads, reactions, reviewer requests, per-commit diffs, and editing a pull request's title or
 description are not available in T3 Code.

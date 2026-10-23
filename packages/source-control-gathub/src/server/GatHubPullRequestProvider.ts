@@ -2,6 +2,8 @@ import { SourceControlProviderKind, type PullRequestCapabilities } from "@t3tool
 import * as Cache from "effect/Cache";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import {
   PullRequestProviderError,
@@ -9,7 +11,10 @@ import {
   type PullRequestProviderApi,
 } from "@t3tools/source-control-core/server/PullRequestProvider";
 
-import { parseDiffFileRevisions } from "@t3tools/source-control-core/server/diffFileRevisions";
+import {
+  parseDiffFilePaths,
+  parseDiffFileRevisions,
+} from "@t3tools/source-control-core/server/diffFileRevisions";
 import { removeAgentCredits } from "@t3tools/source-control-core/server/mergeMessage";
 
 import * as GatHubApi from "./GatHubApi.ts";
@@ -35,10 +40,15 @@ const CAPABILITIES: PullRequestCapabilities = {
   reviewers: { request: false, listCandidates: false },
   // GatHub rewrites a description but not a title, and the page edits both through one control.
   edit: { changeRequest: false, comment: true },
+  // GatHub cancels a run but has no rerun: dispatch starts only workflows with manual inputs.
+  cancelChecks: true,
 };
 
 const Viewer = Schema.Struct({ user: Schema.String });
+const Run = Schema.Struct({ can_cancel: Schema.Boolean });
 const DETAIL_TTL = Duration.seconds(5);
+const FAILED_READ_HOLD = Duration.seconds(10);
+const SCOPE_BATCH = 8;
 
 type PullRef = ProviderRepositoryRef & { readonly number: number };
 
@@ -110,6 +120,98 @@ export const make = Effect.gen(function* () {
     [input.cwd, input.host, input.repository, input.number].join("\n");
   const readDisplayed = (input: PullRef) => Cache.get(displayed, displayKey(input));
 
+  /**
+   * Only a run's own read says whether this viewer may cancel it, and that read carries the run's
+   * log so far, so each still-going run is asked once and its answer held until it finishes, the
+   * viewer cancels it, or the pull leaves the list. Held per checkout, since the credential, and
+   * so the viewer, follows it; a run that cannot be read offers no cancel.
+   */
+  const runCancellable = new Map<string, Map<string, boolean>>();
+  const runsKey = (input: ProviderRepositoryRef, number: number) =>
+    [input.cwd, input.host, number].join("\n");
+  const cancellableRuns = (input: ProviderRepositoryRef, detail: Json.GatHubPullDetail) => {
+    const active = Json.activeRunIds(detail);
+    const key = runsKey(input, detail.id);
+    const held = runCancellable.get(key) ?? new Map<string, boolean>();
+    for (const runId of held.keys()) if (!active.includes(runId)) held.delete(runId);
+    if (active.length === 0) runCancellable.delete(key);
+    else runCancellable.set(key, held);
+    return Effect.forEach(
+      active,
+      (runId) => {
+        const known = held.get(runId);
+        if (known !== undefined) return Effect.succeed(known ? [runId] : []);
+        return read("getChangeRequest", input, `/api/ci/runs/${runId}`, Run).pipe(
+          Effect.tap((run) => Effect.sync(() => held.set(runId, run.can_cancel))),
+          Effect.map((run) => (run.can_cancel ? [runId] : [])),
+          Effect.orElseSucceed(() => []),
+        );
+      },
+      { concurrency: 4 },
+    ).pipe(Effect.map((ids) => new Set(ids.flat())));
+  };
+
+  /**
+   * What each listed pull changes, held for its head: GatHub's `target_head` is the target
+   * branch's current tip on every row, so it moves with every push to the target and says nothing
+   * about a squash-merged pull's own files. Every directory's list in a poll waits on the same
+   * read, and a failed read is held just long enough for that poll's other lists to see it too.
+   */
+  const changedFiles = new Map<
+    string,
+    { readonly head: string; readonly files: Effect.Effect<Option.Option<ReadonlyArray<string>>> }
+  >();
+
+  const filesOf = Effect.fnUntraced(function* (
+    input: ProviderRepositoryRef,
+    pull: Json.GatHubPull,
+  ) {
+    const key = `${input.host} ${pull.id}`;
+    const held = changedFiles.get(key);
+    if (held !== undefined && held.head === pull.head) return yield* held.files;
+    // A failed read is held only briefly, so the poll's other lists share it and the next asks.
+    const files = yield* Effect.cachedWithTTL(
+      readPull("listChangeRequests", { ...input, number: pull.id }).pipe(
+        // A rename moves a file out of one directory and into another, and touches both.
+        Effect.map((detail) =>
+          detail.files.flatMap((file) => [
+            file.path,
+            ...parseDiffFilePaths(file.patch ?? "").flatMap(({ oldPath }) =>
+              oldPath === null || oldPath === file.path ? [] : [oldPath],
+            ),
+          ]),
+        ),
+        Effect.option,
+      ),
+      (exit) =>
+        Exit.isSuccess(exit) && Option.isSome(exit.value) ? Duration.infinity : FAILED_READ_HOLD,
+    );
+    changedFiles.set(key, { head: pull.head, files });
+    return yield* files;
+  });
+
+  const depthOf = (scope: string) => scope.split("/").length;
+
+  /**
+   * The deepest directory project a pull touches, or null for the root's list, from GatHub's
+   * file list alone so every project's list reaches the same answer. A pull whose files cannot
+   * be read stays on the root's list, where nothing is filtered away.
+   */
+  const ownerOf = Effect.fnUntraced(function* (
+    input: ProviderRepositoryRef,
+    pull: Json.GatHubPull,
+    scopes: ReadonlyArray<string>,
+  ) {
+    const files = yield* filesOf(input, pull);
+    if (Option.isNone(files)) return null;
+    const deepestFirst = scopes.toSorted((a, b) => depthOf(b) - depthOf(a) || a.localeCompare(b));
+    return (
+      deepestFirst.find((scope) =>
+        files.value.some((path) => path === scope || path.startsWith(`${scope}/`)),
+      ) ?? null
+    );
+  });
+
   /** Every GatHub write is fenced on the head it was decided against. */
   const write = Effect.fn("GatHubPullRequestProvider.write")(function* (
     operation: string,
@@ -128,6 +230,7 @@ export const make = Effect.gen(function* () {
   const provider: PullRequestProviderApi = {
     kind: KIND,
     capabilities: CAPABILITIES,
+    pathScopedLists: true,
     // GatHub squashes with the description as the message, where agents leave their credits.
     mergeMessageRewrite: removeAgentCredits,
     getViewer: (input) =>
@@ -151,23 +254,59 @@ export const make = Effect.gen(function* () {
         );
         const before = input.cursor?.updatedBefore;
         const seen = new Set(input.cursor?.seenAt ?? []);
-        const rows = pulls
-          .map((pull) => Json.toChangeRequest(pull, input.host))
+        const candidates = pulls
+          .map((pull) => ({ pull, row: Json.toChangeRequest(pull, input.host) }))
           .filter(
-            (pull) =>
-              (input.state === "all" || pull.state === input.state) &&
+            ({ row }) =>
+              (input.state === "all" || row.state === input.state) &&
               (input.involvement !== "authored" ||
-                pull.author?.login.toLowerCase() === input.viewer.toLowerCase()) &&
+                row.author?.login.toLowerCase() === input.viewer.toLowerCase()) &&
               (before === undefined ||
-                pull.updatedAt < before ||
-                (pull.updatedAt === before && !seen.has(pull.number))),
+                row.updatedAt < before ||
+                (row.updatedAt === before && !seen.has(row.number))),
           )
-          .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+          .toSorted((a, b) => b.row.updatedAt.localeCompare(a.row.updatedAt));
         const limit = Math.max(1, input.limit);
+        // What is held for a pull goes once it leaves GatHub's list.
+        const listed = new Set(pulls.map((pull) => `${input.host} ${pull.id}`));
+        for (const key of changedFiles.keys())
+          if (key.startsWith(`${input.host} `) && !listed.has(key)) changedFiles.delete(key);
+        for (const key of runCancellable.keys()) {
+          const [, host, id] = key.split("\n");
+          if (host === input.host && !listed.has(`${host} ${id}`)) runCancellable.delete(key);
+        }
+        const scopes = input.pathScopes ?? [];
+        if (scopes.length === 0) {
+          const rows = candidates.map(({ row }) => row);
+          return {
+            items: rows.slice(0, limit),
+            truncated: pulls_truncated || rows.length > limit,
+            continues: rows.length > limit,
+          };
+        }
+        // A directory's list reads each candidate's files, newest first, only until the page is
+        // full; what a pull changes is held for as long as its head stays put.
+        const own = input.pathScope ?? null;
+        const matched: Array<(typeof candidates)[number]["row"]> = [];
+        let scanned = 0;
+        while (scanned < candidates.length && matched.length <= limit) {
+          const batch = candidates.slice(scanned, scanned + SCOPE_BATCH);
+          scanned += batch.length;
+          const owned = yield* Effect.forEach(
+            batch,
+            ({ pull, row }) =>
+              ownerOf(input, pull, scopes).pipe(
+                Effect.map((owner) => (owner === own ? [row] : [])),
+              ),
+            { concurrency: 4 },
+          );
+          matched.push(...owned.flat());
+        }
+        const more = matched.length > limit;
         return {
-          items: rows.slice(0, limit),
-          truncated: pulls_truncated || rows.length > limit,
-          continues: rows.length > limit,
+          items: matched.slice(0, limit),
+          truncated: pulls_truncated || more,
+          continues: more,
         };
       },
     ),
@@ -185,18 +324,40 @@ export const make = Effect.gen(function* () {
           ),
         { concurrency: 4 },
       ).pipe(Effect.map((stats) => stats.flat())),
-    getChangeRequest: (input) =>
+    getChangeRequest: Effect.fn("GatHubPullRequestProvider.getChangeRequest")(function* (input) {
+      const detail = yield* readDisplayed(input);
+      return Json.toDetail(detail, input.host, yield* cancellableRuns(input, detail));
+    }),
+    // Polled for linked pulls, so it leaves out the run reads that only the cancel button needs.
+    getChangeRequestSummary: (input) =>
       readDisplayed(input).pipe(Effect.map((detail) => Json.toDetail(detail, input.host))),
     getChangeRequestActivity: (input) => readDisplayed(input).pipe(Effect.map(Json.toActivity)),
     getViewerPermissions: (input) =>
       readPull("getViewerPermissions", input).pipe(Effect.map(Json.toViewerPermissions)),
-    getChangeRequestChecks: (input) =>
-      readPull("getChangeRequestChecks", input).pipe(
-        Effect.map((detail) => ({
-          state: Json.pullState(detail),
-          checks: Json.toChecks(detail, input.host),
-        })),
-      ),
+    getChangeRequestChecks: Effect.fn("GatHubPullRequestProvider.getChangeRequestChecks")(
+      function* (input) {
+        // The polled checks row offers no cancel, so it skips the run reads the button needs.
+        const detail = yield* readPull("getChangeRequestChecks", input);
+        return { state: Json.pullState(detail), checks: Json.toChecks(detail, input.host) };
+      },
+    ),
+    cancelCheck: Effect.fn("GatHubPullRequestProvider.cancelCheck")(function* (input) {
+      if (Json.runIdOf({ id: input.runId }) === null)
+        return yield* failure("cancelCheck", "GatHub run ids are numbers.");
+      yield* send("cancelCheck", input, {
+        path: `/api/ci/runs/${input.runId}/cancel`,
+        body: {},
+      }).pipe(
+        Effect.ensuring(
+          Effect.andThen(
+            Cache.invalidate(displayed, displayKey(input)),
+            Effect.sync(() =>
+              runCancellable.get(runsKey(input, input.number))?.delete(input.runId),
+            ),
+          ),
+        ),
+      );
+    }),
     // The patch names each file's blob; a file GatHub omits has none, so it is left unknown, and
     // a path missing from a cut-short file list may still be in the change.
     getFileRevisions: (input) =>

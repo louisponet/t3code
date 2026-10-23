@@ -1,5 +1,6 @@
 import { SourceControlProviderKind } from "@t3tools/contracts";
 import type { RepositoryIdentity, SourceControlProviderInfo } from "@t3tools/contracts";
+import { workspaceRelativeFilePath } from "./path.ts";
 
 export interface ChangeRequestPresentation {
   readonly icon:
@@ -350,4 +351,13 @@ export function canonicalRepositoryKey(key: string): string {
       /^([^.]+)\.visualstudio\.com\/(?:defaultcollection\/)?([^/]+)\/_git\/([^/]+)$/u,
       "dev.azure.com/$1/$2/_git/$3",
     );
+}
+
+/** Where `workspaceRoot` sits inside the checkout rooted at `rootPath`; null at its root. */
+export function repositoryPathScope(
+  rootPath: string | undefined,
+  workspaceRoot: string,
+): string | null {
+  const relative = workspaceRelativeFilePath(workspaceRoot, rootPath);
+  return relative === null || relative === "." ? null : relative.replace(/\/+$/u, "");
 }

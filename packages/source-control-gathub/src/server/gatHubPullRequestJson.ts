@@ -172,18 +172,39 @@ function reviewDecision(detail: GatHubPullDetail): PullRequestReviewDecision | n
   return status.approved_by.length > 0 ? "approved" : null;
 }
 
+/** The runs behind these checks that GatHub may still be running, and so could cancel. */
+export function activeRunIds(detail: GatHubPullDetail): ReadonlyArray<string> {
+  return detail.checks.flatMap((check) => {
+    const runId = runIdOf(check);
+    return runId !== null && checkStatus(check.status) === "pending" ? [runId] : [];
+  });
+}
+
+/** GatHub's runs are numbered; anything else is not one the API can be asked about. */
+export function runIdOf(check: { readonly id?: number | string | undefined }): string | null {
+  const runId = check.id === undefined ? "" : String(check.id);
+  return /^\d+$/u.test(runId) ? runId : null;
+}
+
 /** A pull request's check is a CI run, whose page is GatHub's Actions view of that run. */
-export function toChecks(detail: GatHubPullDetail, host: string): ReadonlyArray<PullRequestCheck> {
+export function toChecks(
+  detail: GatHubPullDetail,
+  host: string,
+  cancellable: ReadonlySet<string> = new Set(),
+): ReadonlyArray<PullRequestCheck> {
   return sortChecks(
-    detail.checks.map((check) => ({
-      name: check.name,
-      status: checkStatus(check.status),
-      description: null,
-      url:
-        check.id === undefined
-          ? null
-          : `http://${host}/#actions?${new URLSearchParams({ run: String(check.id) })}`,
-    })),
+    detail.checks.map((check) => {
+      const runId = runIdOf(check);
+      return {
+        name: check.name,
+        status: checkStatus(check.status),
+        description: null,
+        url:
+          runId === null ? null : `http://${host}/#actions?${new URLSearchParams({ run: runId })}`,
+        ...(runId === null ? {} : { runId }),
+        ...(runId !== null && cancellable.has(runId) ? { canCancel: true } : {}),
+      };
+    }),
   );
 }
 
@@ -217,8 +238,12 @@ export function fileStats(detail: GatHubPullDetail) {
   }));
 }
 
-export function toDetail(detail: GatHubPullDetail, host: string): ProviderChangeRequestDetail {
-  const checks = toChecks(detail, host);
+export function toDetail(
+  detail: GatHubPullDetail,
+  host: string,
+  cancellable: ReadonlySet<string> = new Set(),
+): ProviderChangeRequestDetail {
+  const checks = toChecks(detail, host, cancellable);
   const state = checksState(checks);
   const canMerge = detail.merge.can_merge && pullState(detail) === "open";
   // A file too large to count, or a preview GatHub cut short at its size limit, would make any

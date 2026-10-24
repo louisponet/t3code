@@ -1,5 +1,6 @@
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+import { isGatHubHost } from "@t3tools/shared/sourceControl";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 
 const encodeSubject = Schema.encodeEffect(
@@ -12,11 +13,14 @@ export const resolveThreadTitleLinks = Effect.fn("resolveThreadTitleLinks")(func
 }) {
   const providers = yield* SourceControlProviderRegistry.SourceControlProviderRegistry;
   const links = new Map<string, NonNullable<ReturnType<typeof providers.resolveLink>>>();
-  for (const match of input.message.matchAll(/https:\/\/[^\s<>"')\]`]+/g)) {
+  for (const match of input.message.matchAll(/https?:\/\/[^\s<>"')\]`]+/g)) {
     const candidate = match[0].replace(/[.,;!?]+$/, "");
     if (!URL.canParse(candidate)) continue;
     const url = new URL(candidate);
-    url.hash = "";
+    // GatHub is served over plain HTTP on the tailnet and names a pull request in the hash.
+    const gatHub = isGatHubHost(url.hostname);
+    if (url.protocol === "http:" && !gatHub) continue;
+    if (!gatHub) url.hash = "";
     url.search = "";
     if (links.has(url.href)) continue;
     const lookup = providers.resolveLink({ cwd: input.cwd, url });

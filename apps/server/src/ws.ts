@@ -2529,6 +2529,8 @@ export const layerWsRpc = (
           withPullRequestViewer(input, pullRequests.replyToThread(input)),
         [WS_METHODS.pullRequestsSetThreadResolution]: (input) =>
           withPullRequestViewer(input, pullRequests.setThreadResolution(input)),
+        [WS_METHODS.pullRequestsCancelCheck]: (input) =>
+          withPullRequestViewer(input, pullRequests.cancelCheck(input)),
         [WS_METHODS.pullRequestsSetReaction]: (input) =>
           withPullRequestViewer(input, pullRequests.setReaction(input)),
         [WS_METHODS.pullRequestsReportState]: (input) => pullRequests.reportState(input),

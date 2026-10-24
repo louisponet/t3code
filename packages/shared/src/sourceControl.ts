@@ -1,5 +1,6 @@
 import { SourceControlProviderKind } from "@t3tools/contracts";
 import type { RepositoryIdentity, SourceControlProviderInfo } from "@t3tools/contracts";
+import { workspaceRelativeFilePath } from "./path.ts";
 
 export interface ChangeRequestPresentation {
   readonly icon:
@@ -89,6 +90,16 @@ const GITCAFE_CHANGE_REQUEST_PRESENTATION: ChangeRequestPresentation = {
   urlExample: "https://git.cafe/owner/repo/pulls/42",
 };
 
+const GATHUB_CHANGE_REQUEST_PRESENTATION: ChangeRequestPresentation = {
+  icon: "change-request",
+  providerName: "GatHub",
+  shortName: "PR",
+  longName: "pull request",
+  pluralLongName: "pull requests",
+  providerLongName: "GatHub pull request",
+  urlExample: "http://gathub.gattaca.com/#pulls?id=42",
+};
+
 const GENERIC_CHANGE_REQUEST_PRESENTATION: ChangeRequestPresentation = {
   icon: "change-request",
   providerName: "source control",
@@ -116,6 +127,8 @@ function resolveChangeRequestPresentation(
       return BITBUCKET_CHANGE_REQUEST_PRESENTATION;
     case "gitcafe":
       return GITCAFE_CHANGE_REQUEST_PRESENTATION;
+    case "gathub":
+      return GATHUB_CHANGE_REQUEST_PRESENTATION;
     default:
       return GENERIC_CHANGE_REQUEST_PRESENTATION;
   }
@@ -204,6 +217,16 @@ function isGitCafeHost(host: string): boolean {
   return host === "git.cafe" || host === "staging.git.cafe";
 }
 
+/**
+ * GatHub is served over plain HTTP, reachable only on the tailnet, so its credentials go to
+ * exactly the hosts named here and nowhere a lookalike name points.
+ */
+const GATHUB_HOSTS = new Set(["gathub.gattaca.com"]);
+
+export function isGatHubHost(host: string): boolean {
+  return GATHUB_HOSTS.has(host.trim().toLowerCase());
+}
+
 function isBitbucketHost(host: string): boolean {
   return host === "bitbucket.org" || hasDnsLabel(host, "bitbucket");
 }
@@ -222,6 +245,14 @@ export function detectSourceControlProviderFromRemoteUrl(
       kind: SourceControlProviderKind.make("gitcafe"),
       name: "GitCafe",
       baseUrl: toBaseUrl(hostname),
+    };
+  }
+
+  if (isGatHubHost(hostname)) {
+    return {
+      kind: SourceControlProviderKind.make("gathub"),
+      name: "GatHub",
+      baseUrl: `http://${hostname}`,
     };
   }
 
@@ -320,4 +351,13 @@ export function canonicalRepositoryKey(key: string): string {
       /^([^.]+)\.visualstudio\.com\/(?:defaultcollection\/)?([^/]+)\/_git\/([^/]+)$/u,
       "dev.azure.com/$1/$2/_git/$3",
     );
+}
+
+/** Where `workspaceRoot` sits inside the checkout rooted at `rootPath`; null at its root. */
+export function repositoryPathScope(
+  rootPath: string | undefined,
+  workspaceRoot: string,
+): string | null {
+  const relative = workspaceRelativeFilePath(workspaceRoot, rootPath);
+  return relative === null || relative === "." ? null : relative.replace(/\/+$/u, "");
 }

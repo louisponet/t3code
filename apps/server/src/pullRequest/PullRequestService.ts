@@ -1,6 +1,8 @@
 import {
   canonicalRepositoryKey,
+  isGatHubHost,
   isSshRemoteUrl,
+  repositoryPathScope,
   sourceControlRepositorySelector,
 } from "@t3tools/shared/sourceControl";
 import { normalizeGitRemoteUrl } from "@t3tools/shared/git";
@@ -12,6 +14,7 @@ import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
@@ -70,6 +73,7 @@ import {
   PullRequestSummary,
   type PullRequestThreadReplyInput,
   type PullRequestThreadResolutionInput,
+  type PullRequestCancelCheckInput,
   type PullRequestThreadCommentsInput,
   type PullRequestThreadCommentsResult,
   type PullRequestUpdateInput,
@@ -255,6 +259,9 @@ export class PullRequestService extends Context.Service<
     readonly setThreadResolution: (
       input: PullRequestThreadResolutionInput,
     ) => Effect.Effect<void, PullRequestError>;
+    readonly cancelCheck: (
+      input: PullRequestCancelCheckInput,
+    ) => Effect.Effect<void, PullRequestError>;
     readonly setReaction: (
       input: PullRequestReactionInput,
     ) => Effect.Effect<void, PullRequestError>;
@@ -319,6 +326,13 @@ export interface SupportedProject {
    */
   readonly remote: string;
   readonly repositoryKey: string | null;
+  /**
+   * The project's directory inside its repository, for a host that lists a directory's own
+   * pull requests; null for the repository's root, or a host that lists the whole repository.
+   */
+  readonly pathScope: string | null;
+  /** The repository's own list key, which every directory project inside it shares. */
+  readonly repositoryListKey: string;
 }
 
 interface WorkspaceProjects {
@@ -356,8 +370,10 @@ function parseListCursor(raw: string): ListCursor | null {
   };
 }
 
-function listCursorKey(host: string, repository: string): string {
-  return `${host} ${repository.toLowerCase()}`;
+function listCursorKey(host: string, repository: string, pathScope: string | null = null): string {
+  return pathScope === null
+    ? `${host} ${repository.toLowerCase()}`
+    : `${host} ${repository.toLowerCase()} ${pathScope}`;
 }
 
 /**
@@ -485,6 +501,7 @@ function withRateLimitBackoff(
   const wrapped = {
     kind: api.kind,
     capabilities: api.capabilities,
+    ...(api.pathScopedLists === undefined ? {} : { pathScopedLists: api.pathScopedLists }),
     ...(api.mergeMessageRewrite === undefined
       ? {}
       : { mergeMessageRewrite: api.mergeMessageRewrite }),
@@ -574,6 +591,9 @@ function withRateLimitBackoff(
     replyToThread: interactive("replyToThread", api.replyToThread),
     setReaction: interactive("setReaction", api.setReaction),
     setThreadResolution: interactive("setThreadResolution", api.setThreadResolution),
+    ...(api.cancelCheck === undefined
+      ? {}
+      : { cancelCheck: interactive("cancelCheck", api.cancelCheck) }),
   };
   // Optional provider methods must be forwarded too; returning the interface alone permits omissions.
   return wrapped satisfies PullRequestProviderApi &
@@ -593,6 +613,7 @@ export const make = Effect.gen(function* () {
   const registry = yield* PullRequestProviderRegistry.PullRequestProviderRegistry;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const projects = yield* ProjectService.ProjectService;
+  const fileSystem = yield* FileSystem.FileSystem;
   const repositoryIdentities = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
   const sourceControlProviders = yield* SourceControlProviderRegistry.SourceControlProviderRegistry;
   const rateLimits = yield* SourceControlRateLimit.SourceControlRateLimit;
@@ -677,6 +698,27 @@ export const make = Effect.gen(function* () {
     ).pipe(Effect.map((resolved) => new Map(resolved)));
   };
 
+  /**
+   * Git reports a checkout's root with its symlinks resolved, so a directory project opened
+   * through one is resolved too before it is placed inside its repository.
+   */
+  const realWorkspaceRoots = (projects: ReadonlyArray<OrchestrationProjectShell>) =>
+    Effect.forEach(
+      projects.filter(
+        (project) =>
+          project.repositoryIdentity?.rootPath !== undefined &&
+          project.repositoryIdentity.rootPath !== project.workspaceRoot &&
+          registry.get(project.repositoryIdentity.provider as SourceControlProviderKind)
+            ?.pathScopedLists === true,
+      ),
+      (project) =>
+        fileSystem.realPath(project.workspaceRoot).pipe(
+          Effect.map((real) => [project.id, real] as const),
+          Effect.orElseSucceed(() => [project.id, project.workspaceRoot] as const),
+        ),
+      { concurrency: REPOSITORY_CONCURRENCY },
+    ).pipe(Effect.map((entries) => new Map(entries)));
+
   const listWorkspaceProjects = (
     filter: Pick<PullRequestListInput, "projectId" | "projectIds" | "host"> & {
       readonly repository?: string;
@@ -729,11 +771,18 @@ export const make = Effect.gen(function* () {
         }),
       ),
       Effect.flatMap((projects) =>
-        refineUnknownProjectKinds(projects, filter).pipe(
-          Effect.map((refinedProviders) => ({ refinedProviders, projects })),
+        Effect.all([
+          refineUnknownProjectKinds(projects, filter),
+          realWorkspaceRoots(projects),
+        ]).pipe(
+          Effect.map(([refinedProviders, realRoots]) => ({
+            refinedProviders,
+            realRoots,
+            projects,
+          })),
         ),
       ),
-      Effect.map(({ refinedProviders, projects }) => {
+      Effect.map(({ refinedProviders, realRoots, projects }) => {
         const supported: SupportedProject[] = [];
         const unimplemented = new Map<
           string,
@@ -772,7 +821,17 @@ export const make = Effect.gen(function* () {
           }
           const repositoryKey =
             api?.repositoryKey?.({ canonicalKey: identity.canonicalKey }) ?? null;
-          const key = listCursorKey(host, repositoryKey ?? repository);
+          // A directory of a monorepo is its own project only where the host can list just
+          // that directory's pull requests; elsewhere it shares the repository's list.
+          const pathScope =
+            api?.pathScopedLists === true
+              ? repositoryPathScope(
+                  identity.rootPath,
+                  realRoots.get(project.id) ?? project.workspaceRoot,
+                )
+              : null;
+          const repositoryListKey = listCursorKey(host, repositoryKey ?? repository);
+          const key = listCursorKey(host, repositoryKey ?? repository, pathScope);
           if (seen.has(key)) continue;
           seen.add(key);
           if (api === null) {
@@ -790,6 +849,8 @@ export const make = Effect.gen(function* () {
             remote: repositoryKey ?? normalizeGitRemoteUrl(`https://${host}/${repository}`),
             repositoryKey:
               repositoryKey === null ? null : canonicalRepositoryKey(repositoryKey.toLowerCase()),
+            pathScope,
+            repositoryListKey,
           });
         }
         return { supported, unimplemented, viewerRoots };
@@ -841,9 +902,11 @@ export const make = Effect.gen(function* () {
               onHost.find((candidate) => candidate.repositoryKey === null);
             if (route === undefined) {
               return Effect.gen(function* () {
-                const provider = ["github.com", "bitbucket.org", "codeberg.org"].includes(host)
-                  ? detectSourceControlProviderFromRemoteUrl(`https://${host}/${repository}.git`)
-                  : null;
+                const provider =
+                  ["github.com", "bitbucket.org", "codeberg.org"].includes(host) ||
+                  isGatHubHost(host)
+                    ? detectSourceControlProviderFromRemoteUrl(`https://${host}/${repository}.git`)
+                    : null;
                 const api = provider === null ? null : registry.get(provider.kind);
                 if (api !== null) {
                   const selected = yield* projects.getShell(ref.projectId).pipe(
@@ -865,6 +928,8 @@ export const make = Effect.gen(function* () {
                       host,
                       remote: normalizeGitRemoteUrl(`https://${host}/${repository}`),
                       repositoryKey: null,
+                      pathScope: null,
+                      repositoryListKey: listCursorKey(host, repository),
                     };
                   }
                 }
@@ -1188,6 +1253,25 @@ export const make = Effect.gen(function* () {
     const limit = input.limit ?? DEFAULT_REPOSITORY_LIST_LIMIT;
     const cursorOf = (project: SupportedProject): ListCursor | undefined =>
       continuation?.get(project.cursorKey);
+    // Every directory project of a repository in this listing, not only those still paging, so a
+    // pull request keeps the same owner from the first page to the last.
+    const scopesByRepository = new Map<string, Array<string>>();
+    for (const project of projects) {
+      if (project.pathScope === null) continue;
+      const scopes = scopesByRepository.get(project.repositoryListKey);
+      if (scopes === undefined)
+        scopesByRepository.set(project.repositoryListKey, [project.pathScope]);
+      else scopes.push(project.pathScope);
+    }
+    const pathScopesOf = (project: SupportedProject) => {
+      const pathScopes = scopesByRepository.get(project.repositoryListKey);
+      return pathScopes === undefined
+        ? {}
+        : {
+            pathScopes,
+            ...(project.pathScope === null ? {} : { pathScope: project.pathScope }),
+          };
+    };
 
     const readRepository = (project: SupportedProject): Effect.Effect<RepositoryBatch> => {
       {
@@ -1205,6 +1289,7 @@ export const make = Effect.gen(function* () {
             limit,
             query: input.query,
             filters: input.filters,
+            ...pathScopesOf(project),
             ...(cursor === undefined
               ? {}
               : {
@@ -2245,6 +2330,29 @@ export const make = Effect.gen(function* () {
               .pipe(Effect.mapError(toPullRequestError("setThreadResolution")));
           }),
         );
+      }),
+    );
+
+  /** The host decides who may cancel a run, and says so on the check it reports. */
+  const cancelCheck: PullRequestService["Service"]["cancelCheck"] = (input) =>
+    requireProject(input).pipe(
+      Effect.flatMap((project): Effect.Effect<void, PullRequestError> => {
+        const cancel = project.api.cancelCheck;
+        if (project.api.capabilities.cancelChecks !== true || cancel === undefined) {
+          return Effect.fail(
+            new PullRequestOperationError({
+              operation: "cancelCheck",
+              detail: "This host cannot cancel a check.",
+            }),
+          );
+        }
+        return cancel({
+          cwd: project.project.workspaceRoot,
+          repository: project.repository,
+          host: project.host,
+          number: input.number,
+          runId: input.runId,
+        }).pipe(Effect.mapError(toPullRequestError("cancelCheck")));
       }),
     );
 
@@ -3511,6 +3619,7 @@ export const make = Effect.gen(function* () {
     submitReview: invalidatedByMutation(submitReview),
     replyToThread: invalidatedByMutation(replyToThread),
     setThreadResolution: invalidatedByMutation(setThreadResolution),
+    cancelCheck: invalidatedByMutation(cancelCheck),
     setReaction: invalidatedByMutation(setReaction),
     reviewerCandidates,
     requestReviewers: invalidatedByMutation(requestReviewers),

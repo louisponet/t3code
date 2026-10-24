@@ -59,6 +59,7 @@ import {
 import {
   canonicalRepositoryKey,
   getChangeRequestTerminologyForKind,
+  isGatHubHost,
   isSshRemoteUrl,
   type ChangeRequestTerminology,
 } from "@t3tools/shared/sourceControl";
@@ -259,6 +260,11 @@ interface BranchHeadContext {
 export function pullRequestRepositoryKey(value: string): string | null {
   try {
     const url = new URL(value);
+    // GatHub names a pull request in the hash route, and its host serves one repository.
+    if (isGatHubHost(url.hostname)) {
+      const link = parseChangeRequestUrl(value);
+      return link === null ? null : `${link.host}/${link.repository}`;
+    }
     const match =
       /^(.*)(?:\/pulls?\/|\/-\/merge_requests\/|\/pull-requests\/|\/pullrequest\/)\d+(?:\/.*)?$/iu.exec(
         url.pathname,

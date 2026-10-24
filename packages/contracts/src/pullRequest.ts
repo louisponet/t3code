@@ -113,6 +113,10 @@ export const PullRequestCheck = Schema.Struct({
   description: Schema.NullOr(Schema.String),
   url: Schema.NullOr(Schema.String),
   required: Schema.optional(Schema.Boolean),
+  /** The host's id for the run behind the check, set where the host can act on it. */
+  runId: Schema.optional(TrimmedNonEmptyString),
+  /** The host says this viewer may cancel the run now. */
+  canCancel: Schema.optional(Schema.Boolean),
 });
 export type PullRequestCheck = typeof PullRequestCheck.Type;
 
@@ -282,6 +286,7 @@ export const PullRequestCapabilities = Schema.Struct({
   stacks: Schema.optional(Schema.Boolean),
   stackActions: Schema.optional(Schema.Boolean),
   labels: Schema.optional(Schema.Boolean),
+  cancelChecks: Schema.optional(Schema.Boolean),
 });
 export type PullRequestCapabilities = typeof PullRequestCapabilities.Type;
 
@@ -845,6 +850,12 @@ export const PullRequestThreadResolutionInput = Schema.Struct({
 });
 export type PullRequestThreadResolutionInput = typeof PullRequestThreadResolutionInput.Type;
 
+export const PullRequestCancelCheckInput = Schema.Struct({
+  ...PullRequestRef.fields,
+  runId: TrimmedNonEmptyString,
+});
+export type PullRequestCancelCheckInput = typeof PullRequestCancelCheckInput.Type;
+
 export const PullRequestReactionInput = Schema.Struct({
   ...PullRequestRef.fields,
   subjectId: Schema.optional(TrimmedNonEmptyString),
@@ -916,6 +927,14 @@ const PROVIDER_REQUIREMENT = new Map<
       missing:
         "Azure CLI (`az`) with the Azure DevOps extension is required. Install `az`, then run `az extension add --name azure-devops`.",
       unauthenticated: "Azure CLI is not signed in. Run `az login` and retry.",
+    },
+  ],
+  [
+    "gathub",
+    {
+      missing: "GatHub uses the token git pushes with, and git is not available on the server.",
+      unauthenticated:
+        "Git has no GatHub credential on the server. Push once over HTTP with your GatHub token so git's credential helper stores it.",
     },
   ],
   [

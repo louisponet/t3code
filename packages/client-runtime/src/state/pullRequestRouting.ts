@@ -57,6 +57,7 @@ const writes = new Set<string>([
   WS_METHODS.pullRequestsReplyToThread,
   WS_METHODS.pullRequestsSetReaction,
   WS_METHODS.pullRequestsSetThreadResolution,
+  WS_METHODS.pullRequestsCancelCheck,
   WS_METHODS.pullRequestsRequestReviewers,
   WS_METHODS.pullRequestsSetLabels,
 ]);

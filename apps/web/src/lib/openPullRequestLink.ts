@@ -21,7 +21,7 @@ import { usePrimaryEnvironmentId } from "../state/environments";
 export {
   parseChangeRequestUrl,
   type ChangeRequestLink,
-  gitHubPullRequestBrowserUrl,
+  pullRequestBrowserUrl,
   pullRequestCandidateUrlFromReferenceAutolink,
   matchesLinkedPullRequestUrl,
   changeRequestRepositoryUrl,

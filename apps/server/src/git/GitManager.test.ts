@@ -1860,6 +1860,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       "gitlab.example/group/pull/123/repository",
     ],
     ["https://github.example.com/team/repository/issues/42", null],
+    ["http://gathub.gattaca.com/#pulls?id=42", "gathub.gattaca.com/repo"],
   ] as const)("reads the repository from the returned PR URL %s", (url, expected) => {
     expect(GitManager.pullRequestRepositoryKey(url)).toBe(expected);
   });

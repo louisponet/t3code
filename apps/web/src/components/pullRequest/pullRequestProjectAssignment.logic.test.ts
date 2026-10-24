@@ -167,3 +167,45 @@ describe("where a pull request can be acted on", () => {
     });
   });
 });
+
+describe("one server per monorepo listed by directory", () => {
+  it("lists the repository from the server holding its root, not only a directory", () => {
+    const inRepo = (id: string, environmentId: string, workspaceRoot: string) => ({
+      id: id as ProjectId,
+      environmentId: environmentId as EnvironmentId,
+      workspaceRoot,
+      repositoryIdentity: {
+        canonicalKey: "gathub.gattaca.com/repo",
+        provider: "gathub",
+        rootPath: "/repo",
+      },
+    });
+    const assignment = assignProjectsToEnvironments(
+      [inRepo("javelin", "env-a", "/repo/javelin"), inRepo("root", "env-b", "/repo")],
+      envs("env-a", "env-b"),
+      "env-a" as EnvironmentId,
+    );
+    expect(plain(assignment)).toEqual({ "env-b": ["root"] });
+  });
+
+  // Each server knows only its own directories, so a pull touching both is on both lists: it
+  // changes both projects, and the alternative is a directory whose pull requests are on none.
+  it("lists each directory from a server holding it when no server holds the root", () => {
+    const inRepo = (id: string, environmentId: string, workspaceRoot: string) => ({
+      id: id as ProjectId,
+      environmentId: environmentId as EnvironmentId,
+      workspaceRoot,
+      repositoryIdentity: {
+        canonicalKey: "gathub.gattaca.com/repo",
+        provider: "gathub",
+        rootPath: "/repo",
+      },
+    });
+    const assignment = assignProjectsToEnvironments(
+      [inRepo("javelin", "env-a", "/repo/javelin"), inRepo("solana", "env-b", "/repo/solana")],
+      envs("env-a", "env-b"),
+      "env-a" as EnvironmentId,
+    );
+    expect(plain(assignment)).toEqual({ "env-a": ["javelin"], "env-b": ["solana"] });
+  });
+});

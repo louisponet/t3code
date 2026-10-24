@@ -199,6 +199,7 @@ import {
   PullRequestThreadCommentsResult,
   PullRequestThreadReplyInput,
   PullRequestThreadResolutionInput,
+  PullRequestCancelCheckInput,
   PullRequestUnavailableError,
   PullRequestUpdateInput,
 } from "./pullRequest.ts";
@@ -571,6 +572,7 @@ export const WS_METHODS = {
   pullRequestsSubmitReview: "pullRequests.submitReview",
   pullRequestsReplyToThread: "pullRequests.replyToThread",
   pullRequestsSetThreadResolution: "pullRequests.setThreadResolution",
+  pullRequestsCancelCheck: "pullRequests.cancelCheck",
   pullRequestsSetReaction: "pullRequests.setReaction",
   pullRequestsInvalidate: "pullRequests.invalidate",
   pullRequestsReportState: "pullRequests.reportState",
@@ -1120,6 +1122,12 @@ const WsPullRequestsReplyToThreadRpc = Rpc.make(WS_METHODS.pullRequestsReplyToTh
 
 const WsPullRequestsSetThreadResolutionRpc = Rpc.make(WS_METHODS.pullRequestsSetThreadResolution, {
   payload: PullRequestThreadResolutionInput,
+  success: Schema.Void,
+  error: PullRequestRpcError,
+});
+
+const WsPullRequestsCancelCheckRpc = Rpc.make(WS_METHODS.pullRequestsCancelCheck, {
+  payload: PullRequestCancelCheckInput,
   success: Schema.Void,
   error: PullRequestRpcError,
 });
@@ -2045,6 +2053,7 @@ export const WsCoreRpcGroup = RpcGroup.make(
   WsPullRequestsSubmitReviewRpc,
   WsPullRequestsReplyToThreadRpc,
   WsPullRequestsSetThreadResolutionRpc,
+  WsPullRequestsCancelCheckRpc,
   WsPullRequestsSetReactionRpc,
   WsPullRequestsInvalidateRpc,
   WsPullRequestsReportStateRpc,

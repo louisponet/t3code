@@ -477,6 +477,23 @@ describe("pull request toolkit handlers", () => {
     }),
   );
 
+  it.effect("links a GatHub pull request from a thread in another project", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness();
+      const url = "http://gathub.gattaca.com/#pulls?id=10";
+      const fromNumber = yield* harness.call("link_pull_request", {
+        host: "gathub.gattaca.com",
+        repository: "gattaca/repo",
+        number: 10,
+      });
+      expect(fromNumber).toMatchObject({ repository: "repo", url });
+      const fromUrl = yield* harness.call("link_pull_request", {
+        url: "http://gathub.gattaca.com/#pulls?id=11",
+      });
+      expect(fromUrl).toMatchObject({ host: "gathub.gattaca.com", repository: "repo", number: 11 });
+    }),
+  );
+
   it.effect("treats a duplicate link as alreadyLinked rather than an error", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness({

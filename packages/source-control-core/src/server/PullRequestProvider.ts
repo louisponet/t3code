@@ -276,6 +276,8 @@ export interface PullRequestProviderApi {
   >;
   readonly kind: SourceControlProviderKind;
   readonly capabilities: PullRequestCapabilities;
+  /** A project on a directory of the repository lists only the pull requests touching it. */
+  readonly pathScopedLists?: boolean;
   readonly mergeMessageRewrite?: (message: string) => string;
   /**
    * Absent means `owner/name` on the host identifies it, and any checkout on the host can serve a
@@ -310,6 +312,14 @@ export interface PullRequestProviderApi {
        * what it gets for the fields a row carries.
        */
       readonly filters?: PullRequestListFilters | undefined;
+      /**
+       * Set only for a host whose `pathScopedLists` is true, when the listing has
+       * projects on directories of this repository: every such directory, and the one this
+       * page is for (absent for the repository's root). A pull request belongs to the deepest
+       * of them it touches, or to the root when it touches none, and a page lists only its own.
+       */
+      readonly pathScopes?: ReadonlyArray<string> | undefined;
+      readonly pathScope?: string | undefined;
     },
   ) => Effect.Effect<ProviderChangeRequestPage, PullRequestProviderError>;
 
@@ -551,6 +561,11 @@ export interface PullRequestProviderApi {
       readonly content: PullRequestReactionContent;
       readonly reacted: boolean;
     },
+  ) => Effect.Effect<void, PullRequestProviderError>;
+
+  /** Only called when `capabilities.cancelChecks` is true. */
+  readonly cancelCheck?: (
+    input: ProviderRepositoryRef & { readonly number: number; readonly runId: string },
   ) => Effect.Effect<void, PullRequestProviderError>;
 
   readonly setThreadResolution: (

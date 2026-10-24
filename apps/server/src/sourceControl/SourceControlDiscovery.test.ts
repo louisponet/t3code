@@ -26,6 +26,7 @@ import * as GitHubPullRequestApi from "@t3tools/source-control-github/server/Git
 import * as GitLabCli from "@t3tools/source-control-gitlab/server/GitLabCli";
 import * as GitLabPullRequestCli from "@t3tools/source-control-gitlab/server/GitLabPullRequestCli";
 import * as ForgejoCli from "@t3tools/source-control-forgejo/server/ForgejoCli";
+import * as GatHubApi from "@t3tools/source-control-gathub/server/GatHubApi";
 import * as GitCafeApi from "@t3tools/source-control-gitcafe/server/GitCafeApi";
 import * as GitCafeCredentials from "@t3tools/source-control-gitcafe/server/GitCafeCredentials";
 import * as ForgejoSourceControlProvider from "@t3tools/source-control-forgejo/server/ForgejoSourceControlProvider";
@@ -61,6 +62,9 @@ const layerSourceControlProviderRegistryTest = (input: {
         Layer.mock(GitLabCli.GitLabCli)({}),
         Layer.mock(GitLabPullRequestCli.GitLabPullRequestCli)({}),
         Layer.mock(ForgejoCli.ForgejoCli)({ listLogins: () => Effect.succeed([]) }),
+        Layer.mock(GatHubApi.GatHubApi)({
+          request: () => Effect.succeed(JSON.stringify({ user: "gathub-user" })),
+        }),
         Layer.mock(GitCafeApi.GitCafeApi)({}),
         Layer.mock(GitCafeCredentials.GitCafeCredentials)({
           cliEnv: () => Effect.succeed({}),
@@ -238,6 +242,12 @@ Logged in to gitlab.com as gitlab-user
           kind: SourceControlProviderKind.make("gitcafe"),
           auth: "authenticated",
           account: Option.some("cafe-user"),
+          detail: Option.none(),
+        },
+        {
+          kind: SourceControlProviderKind.make("gathub"),
+          auth: "authenticated",
+          account: Option.some("gathub-user"),
           detail: Option.none(),
         },
       ],

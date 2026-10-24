@@ -37,6 +37,7 @@ import * as GitHubCredentials from "@t3tools/source-control-github/server/GitHub
 import * as GitLabCli from "@t3tools/source-control-gitlab/server/GitLabCli";
 import * as GitLabPullRequestCli from "@t3tools/source-control-gitlab/server/GitLabPullRequestCli";
 import * as ForgejoCli from "@t3tools/source-control-forgejo/server/ForgejoCli";
+import * as GatHubApi from "@t3tools/source-control-gathub/server/GatHubApi";
 import * as GitCafeApi from "@t3tools/source-control-gitcafe/server/GitCafeApi";
 import * as GitCafeCredentials from "@t3tools/source-control-gitcafe/server/GitCafeCredentials";
 import * as SourceControlProviderRegistry from "./SourceControlProviderRegistry.ts";
@@ -154,6 +155,7 @@ function makeRegistry(input: {
           listLogins: () => Effect.succeed([]),
           ...input.forgejo,
         }),
+        Layer.mock(GatHubApi.GatHubApi)({}),
         Layer.mock(GitCafeApi.GitCafeApi)({}),
         Layer.mock(GitCafeCredentials.GitCafeCredentials)({
           cliEnv: () => Effect.succeed({}),
@@ -294,6 +296,12 @@ it.effect(
         assert.ok(lookup);
         assert.deepStrictEqual(yield* lookup, expected);
       }
+      assert.ok(
+        registry.resolveLink({
+          cwd: "/unrelated",
+          url: new URL("http://gathub.gattaca.com/#pulls?id=1"),
+        }),
+      );
       for (const url of [
         "https://example.test/team/project/issues/1",
         "https://github.attacker.test/team/project/issues/1",
@@ -304,6 +312,10 @@ it.effect(
         "https://dev.azure.com/org/project/_git/repo/pullrequest/1",
         "http://github.com/team/project/issues/1",
         "https://user:secret@github.com/team/project/issues/1",
+        // Plain HTTP is GatHub's alone, and only on the host it names.
+        "http://gathub.attacker.test/#pulls?id=1",
+        "http://user:secret@gathub.gattaca.com/#pulls?id=1",
+        "http://gathub.gattaca.com/#code",
       ]) {
         assert.strictEqual(
           registry.resolveLink({ cwd: "/unrelated", url: new URL(url) }),

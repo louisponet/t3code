@@ -1,4 +1,5 @@
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
+import { useAtomValue } from "@effect/atom-react";
 import { useAtomCommand } from "~/state/use-atom-command";
 import type {
   EnvironmentId,
@@ -14,6 +15,7 @@ import {
   ChevronRightIcon,
   HammerIcon,
   ListFilterIcon,
+  SquareIcon,
   TagIcon,
   UsersIcon,
 } from "lucide-react";
@@ -487,6 +489,22 @@ export function PullRequestSummaryTab({
   };
 
   const update = useAtomCommand(pullRequestEnvironment.update, { reportFailure: false });
+  const cancelCheck = useAtomCommand(pullRequestEnvironment.cancelCheck, { reportFailure: false });
+  const canCancelChecks =
+    useAtomValue(pullRequestEnvironment.cancelCheck.permissionAtom(environmentId)) &&
+    detail.capabilities.cancelChecks === true;
+  const [cancellingRun, setCancellingRun] = useState<string | null>(null);
+  const cancelRun = async (runId: string) => {
+    if (cancellingRun !== null) return;
+    setCancellingRun(runId);
+    const result = await cancelCheck({ environmentId, input: { ...reference, runId } });
+    setCancellingRun(null);
+    if (result._tag === "Failure") {
+      toastManager.add({ type: "error", title: "Could not cancel the check" });
+      return;
+    }
+    onRefreshChecks();
+  };
   const updateComment = useAtomCommand(pullRequestEnvironment.updateComment, {
     reportFailure: false,
   });
@@ -829,6 +847,18 @@ export function PullRequestSummaryTab({
                     {pullRequestCheckStatusLabel(check)}
                   </span>
                 </button>
+                {canCancelChecks && check.canCancel === true && check.runId !== undefined ? (
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    className="shrink-0"
+                    disabled={cancellingRun !== null}
+                    onClick={() => check.runId && void cancelRun(check.runId)}
+                  >
+                    <SquareIcon className="size-3" />
+                    {cancellingRun === check.runId ? "Cancelling..." : "Cancel"}
+                  </Button>
+                ) : null}
                 {onFixFinding && failing ? (
                   <Button
                     size="xs"

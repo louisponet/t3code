@@ -53,7 +53,7 @@ import { resolveShortcutCommand, type ShortcutMatchContext } from "~/keybindings
 import { primaryServerKeybindingsAtom } from "~/state/server";
 import { usePullRequestDefaultMergeMethodResolver } from "./usePullRequestActions";
 import { OFF_HEAD_PULL_REQUEST_CHECKOUT_TOAST } from "./pullRequestCheckoutToast";
-import { changeRequestRepositoryUrl, gitHubPullRequestBrowserUrl } from "~/lib/openPullRequestLink";
+import { changeRequestRepositoryUrl, pullRequestBrowserUrl } from "~/lib/openPullRequestLink";
 import { usePreparePullRequestThreadAction } from "~/lib/sourceControlActions";
 import { cn } from "~/lib/utils";
 import { readLocalApi } from "~/localApi";
@@ -307,7 +307,7 @@ export function PullRequestDetailPanel({
     supportsThreadPullRequests,
   );
   const loadingCheckoutCommand = loadingPullRequestCheckoutCommand(reference, repositoryIdentity);
-  const unavailableGitHubUrl = gitHubPullRequestBrowserUrl(
+  const unavailableHostUrl = pullRequestBrowserUrl(
     repositoryIdentity,
     reference.repository,
     reference.number,
@@ -1700,7 +1700,14 @@ export function PullRequestDetailPanel({
               : { error: detailQuery.error })}
             refreshing={detailQuery.isPending}
             onRetry={refreshDetail}
-            {...(unavailableGitHubUrl ? { gitHubUrl: unavailableGitHubUrl } : {})}
+            {...(unavailableHostUrl
+              ? {
+                  hostLink: {
+                    url: unavailableHostUrl,
+                    label: sourceControlClients.get(repositoryIdentity?.provider).label,
+                  },
+                }
+              : {})}
           />
         ) : detail ? (
           <PullRequestMarkdownContext value={markdownContext}>

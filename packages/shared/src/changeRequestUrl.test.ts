@@ -11,6 +11,19 @@ import {
 import { normalizeThreadPullRequestKey } from "./threadPullRequests.ts";
 
 describe("parseChangeRequestUrl", () => {
+  it("reads a GatHub pull request from its hash route, and writes one back", () => {
+    const url = "http://gathub.gattaca.com/#pulls?id=10";
+    expect(parseChangeRequestUrl(url)).toEqual({
+      host: "gathub.gattaca.com",
+      repository: "repo",
+      number: 10,
+    });
+    expect(changeRequestUrlFor("gathub", "gathub.gattaca.com", "repo", 10)).toBe(url);
+    expect(parseChangeRequestUrl("http://gathub.gattaca.com/#pulls")).toBeNull();
+    for (const id of ["1e3", "0x10", "7.0", "%207", "0"])
+      expect(parseChangeRequestUrl(`http://gathub.gattaca.com/#pulls?id=${id}`)).toBeNull();
+  });
+
   it("reads a GitHub pull request, lower-casing the repository", () => {
     expect(parseChangeRequestUrl("https://github.com/T3Tools/T3Code/pull/123")).toEqual({
       host: "github.com",

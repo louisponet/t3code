@@ -69,6 +69,11 @@ export interface SourceControlClientDefinition {
   readonly checkoutChangeRequestHost: (identity: ChangeRequestProjectIdentity) => string | null;
   readonly isChangeRequestUrl: (url: string) => boolean;
   readonly settings?: SourceControlHostSettingsSchema;
+  /**
+   * The server lists only a directory's pull requests for a project opened on a directory of
+   * a repository on this host, so such a project is a list of its own rather than a repeat.
+   */
+  readonly pathScopedLists?: boolean;
 }
 
 export type SourceControlHostSettingsSchema = {

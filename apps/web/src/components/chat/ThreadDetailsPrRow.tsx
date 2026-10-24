@@ -355,7 +355,17 @@ export function ThreadDetailsPrRow({
                 tooltip: `Merge this pull request (${selectedMergeMethod})`,
                 onClick: () => setConfirmingMerge(true),
               }
-            : null;
+            : rowAction === "merge-blocked"
+              ? {
+                  label: "Merge",
+                  pendingLabel: "Merge",
+                  pending: false,
+                  destructive: false,
+                  suffix: null,
+                  tooltip: detail?.mergeBlockers?.join(" · ") ?? "",
+                  onClick: undefined,
+                }
+              : null;
 
   const watching =
     onStopWatching !== undefined && (detail?.state ?? pr?.state ?? "open") === "open";
@@ -448,6 +458,13 @@ export function ThreadDetailsPrRow({
                       part="meta"
                       tone={trailingAction.destructive ? "destructive" : "primary"}
                       disabled={actionPending || handoff !== null}
+                      // Disabled buttons drop hover and focus, which the host's reason needs.
+                      aria-disabled={rowAction === "merge-blocked" || undefined}
+                      aria-label={
+                        rowAction === "merge-blocked"
+                          ? `Merge unavailable: ${trailingAction.tooltip}`
+                          : undefined
+                      }
                       onClick={trailingAction.onClick}
                     />
                   }

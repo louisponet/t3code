@@ -93,6 +93,7 @@ export const GatHubPullDetail = Schema.Struct({
   files_truncated: Schema.Boolean,
   merge: Schema.Struct({
     can_merge: Schema.Boolean,
+    blockers: Schema.optional(Schema.Array(Schema.String)),
     default_title: Schema.optional(Schema.NullOr(Schema.String)),
   }),
   review_status: Schema.Struct({
@@ -245,7 +246,11 @@ export function toDetail(
 ): ProviderChangeRequestDetail {
   const checks = toChecks(detail, host, cancellable);
   const state = checksState(checks);
-  const canMerge = detail.merge.can_merge && pullState(detail) === "open";
+  const open = pullState(detail) === "open";
+  const canMerge = detail.merge.can_merge && open;
+  const mergeBlockers = open
+    ? (detail.merge.blockers ?? []).map((blocker) => blocker.trim()).filter(Boolean)
+    : [];
   // A file too large to count, or a preview GatHub cut short at its size limit, would make any
   // total a guess; 0/0 is shown as no count.
   const counted =
@@ -274,6 +279,7 @@ export function toDetail(
     // GatHub only squashes.
     mergeCapabilities: { merge: false, squash: canMerge, rebase: false },
     viewerPermissions: toViewerPermissions(detail),
+    ...(canMerge || mergeBlockers.length === 0 ? {} : { mergeBlockers }),
   };
 }
 

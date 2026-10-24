@@ -223,6 +223,29 @@ describe("GatHubPullRequestProvider", () => {
     }).pipe(Effect.provide(fake.layer));
   });
 
+  it.effect("says why GatHub refuses a merge, and only while the pull request is open", () => {
+    const blocked = {
+      ...pull,
+      merge: {
+        can_merge: false,
+        blockers: ["Review obligations are not satisfied"],
+        default_title: "Port routing (#7)",
+      },
+    };
+    const fake = fakeGatHub({
+      "GET /api/pulls/7": blocked,
+      "GET /api/pulls/8": { ...blocked, id: 8, state: "closed" },
+    });
+    return Effect.gen(function* () {
+      const provider = yield* GatHubPullRequestProvider.make;
+      const detail = yield* provider.getChangeRequest(target);
+      assert.deepStrictEqual(detail.mergeBlockers, ["Review obligations are not satisfied"]);
+      assert.isFalse(detail.viewerPermissions.actions.includes("merge"));
+      const closed = yield* provider.getChangeRequest({ ...target, number: 8 });
+      assert.isUndefined(closed.mergeBlockers);
+    }).pipe(Effect.provide(fake.layer));
+  });
+
   it.effect("keeps a file's path as written, so its blob still fences the viewed mark", () => {
     const spaced = {
       path: "a.rs ",

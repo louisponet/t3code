@@ -1132,6 +1132,10 @@ export function PullRequestDetailPanel({
         canMerge: canMergeSinglePullRequest && can("merge"),
         canMarkReady: can("ready"),
         canEnableAutoMerge: canMergeSinglePullRequest && can("enable-auto-merge"),
+        mergeBlocked:
+          canWriteSourceControl &&
+          canMergeSinglePullRequest &&
+          (detail.mergeBlockers?.length ?? 0) > 0,
       })
     : null;
   const showsDraftToggle =
@@ -1325,6 +1329,7 @@ export function PullRequestDetailPanel({
                 pendingAutoMergeLabel={pendingAutoMergeLabel}
                 selectedMergeMethod={selectedMergeMethod}
                 selectedMergeMethodLabel={selectedMergeMethodLabel}
+                mergeBlockers={detail.mergeBlockers ?? []}
                 statePresentation={statePresentation}
                 pendingAction={pendingAction}
                 perform={perform}

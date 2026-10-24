@@ -181,6 +181,7 @@ describe("pull request primary control", () => {
     canMerge: true,
     canMarkReady: true,
     canEnableAutoMerge: true,
+    mergeBlocked: false,
   };
 
   // regression: #9188 pending/failing checks offered Merge instead of auto-merge
@@ -201,6 +202,18 @@ describe("pull request primary control", () => {
         autoMergeEnabled: undefined,
       }),
     ).toBe("merge");
+  });
+
+  it("shows a merge the host refuses as blocked rather than hiding it", () => {
+    expect(
+      resolvePullRequestPrimaryControl({
+        ...open,
+        autoMergeEnabled: undefined,
+        hasMergeMethod: false,
+        canMerge: false,
+        mergeBlocked: true,
+      }),
+    ).toBe("merge-blocked");
   });
 });
 
@@ -1146,6 +1159,18 @@ describe("the compact row's single action slot", () => {
       checks: [check("success")],
       ...overrides,
     }) as NonNullable<Parameters<typeof resolveThreadPanelPullRequestAction>[0]>;
+
+  it("shows a merge the host refuses as blocked once checks pass", () => {
+    const blocked = {
+      viewerPermissions: { actions: [] } as unknown as PullRequestDetailView["viewerPermissions"],
+      mergeCapabilities: { merge: false, squash: false, rebase: false },
+      mergeBlockers: ["Review obligations are not satisfied"],
+    };
+    expect(resolveThreadPanelPullRequestAction(openDetail(blocked))).toBe("merge-blocked");
+    expect(
+      resolveThreadPanelPullRequestAction(openDetail({ ...blocked, checks: [check("pending")] })),
+    ).toBeNull();
+  });
 
   it("holds the slot while checks run rather than offering a merge that races them", () => {
     expect(

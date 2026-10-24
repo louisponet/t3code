@@ -591,6 +591,8 @@ export const PullRequestDetail = Schema.Struct({
   autoMergeEnabled: Schema.optional(Schema.Boolean),
   autoMergeMethod: Schema.optional(PullRequestMergeMethod),
   workflowApprovalsRequired: Schema.optional(NonNegativeInt),
+  /** The host's own reasons it refuses to merge this yet, for hosts that report them. */
+  mergeBlockers: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
 });
 export type PullRequestDetail = typeof PullRequestDetail.Type;
 

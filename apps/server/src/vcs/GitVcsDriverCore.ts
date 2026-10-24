@@ -3744,6 +3744,20 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     const onCheckoutProgress = progress?.onCheckoutProgress;
 
     const checkoutWorkers = (yield* readConfigValue(input.cwd, "checkout.workers")) ?? "0";
+    // `worktree add -b` creates the branch before checking out, and keeps it when the checkout
+    // fails (a missing Git LFS object, a failing filter), so a retry would find the name taken.
+    const makesBranch =
+      input.newRefName !== undefined && !(yield* branchExists(input.cwd, input.newRefName));
+    const removeMadeBranch = (newRefName: string) =>
+      executeGit(
+        "GitVcsDriver.createWorktree.cleanup",
+        input.cwd,
+        ["branch", "-D", "--", newRefName],
+        {
+          allowNonZeroExit: true,
+          timeoutMs: 5_000,
+        },
+      ).pipe(Effect.ignore);
     yield* executeGitWithStableDiagnostics(
       "GitVcsDriver.createWorktree",
       input.cwd,
@@ -3765,6 +3779,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
             }
           : {}),
       },
+    ).pipe(
+      Effect.tapError(() =>
+        makesBranch && input.newRefName !== undefined
+          ? removeMadeBranch(input.newRefName)
+          : Effect.void,
+      ),
     );
 
     if (progress?.onWorktreeClaimed) {

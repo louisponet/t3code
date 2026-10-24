@@ -3233,6 +3233,44 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
       }),
     );
 
+    it.effect("removes the branch it made when the worktree checkout fails", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const pathService = yield* Path.Path;
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        // A file whose checkout filter fails, as Git LFS does when its object is missing.
+        yield* writeTextFile(cwd, ".gitattributes", "*.bin filter=broken\n");
+        yield* writeTextFile(cwd, "data.bin", "payload\n");
+        yield* git(cwd, ["config", "filter.broken.clean", "cat"]);
+        yield* git(cwd, ["config", "filter.broken.smudge", "false"]);
+        yield* git(cwd, ["config", "filter.broken.required", "true"]);
+        yield* git(cwd, ["add", "."]);
+        yield* git(cwd, ["commit", "-m", "add filtered file"]);
+        yield* git(cwd, ["branch", "existing"]);
+        const worktreesDirectory = yield* makeTmpDir("git-worktrees-");
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        for (const newRefName of ["t3/new-thread", "existing"]) {
+          const worktreePath = pathService.join(worktreesDirectory, newRefName.replace("/", "-"));
+          yield* driver
+            .createWorktree({ cwd, path: worktreePath, refName: initialBranch, newRefName })
+            .pipe(Effect.flip);
+          assert.equal(yield* fileSystem.exists(worktreePath), false);
+        }
+
+        // The failed thread leaves no branch behind; a branch that was already there stays.
+        assert.deepEqual(
+          (yield* git(cwd, ["branch", "--format=%(refname:short)"])).split("\n").toSorted(),
+          ["existing", initialBranch].toSorted(),
+        );
+        assert.equal(
+          (yield* git(cwd, ["worktree", "list", "--porcelain"])).split("worktree ").length,
+          2,
+        );
+      }),
+    );
+
     it.effect("still creates the worktree when submodule checkout fails", () =>
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;

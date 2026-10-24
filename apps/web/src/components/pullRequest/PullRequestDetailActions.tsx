@@ -193,6 +193,7 @@ export function PullRequestPrimaryAction({
   pendingAutoMergeLabel,
   selectedMergeMethod,
   selectedMergeMethodLabel,
+  mergeBlockers,
   statePresentation,
   pendingAction,
   perform,
@@ -205,6 +206,7 @@ export function PullRequestPrimaryAction({
   pendingAutoMergeLabel: string;
   selectedMergeMethod: PullRequestMergeMethod;
   selectedMergeMethodLabel: string;
+  mergeBlockers: ReadonlyArray<string>;
   statePresentation: ReturnType<typeof resolvePullRequestState> | null;
   pendingAction: PullRequestAction | null;
   perform: PerformPullRequestAction;
@@ -368,6 +370,24 @@ export function PullRequestPrimaryAction({
                 ? "Confirm merge?"
                 : selectedMergeMethodLabel}
           </TooltipPopup>
+        </Tooltip>
+      ) : primaryAction === "merge-blocked" ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              // Focusable while disabled, so the host's reason reaches keyboard users.
+              <Button
+                size="xs"
+                variant="default"
+                aria-disabled="true"
+                aria-label={`Merge unavailable: ${mergeBlockers.join(" · ")}`}
+              >
+                <PullRequestGlyph.merged aria-hidden className="size-3.5" />
+                <span className="@max-[30rem]/pr-header:hidden">Merge</span>
+              </Button>
+            }
+          />
+          <TooltipPopup side="top">{mergeBlockers.join(" · ")}</TooltipPopup>
         </Tooltip>
       ) : (primaryAction === "merged" || primaryAction === "closed") &&
         statePresentation !== null ? (

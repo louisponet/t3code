@@ -10,7 +10,12 @@ import { PullRequestGlyph } from "./pullRequestGlyphs";
 
 type ActionDetail = Pick<
   PullRequestDetail,
-  "state" | "isDraft" | "mergeability" | "autoMergeEnabled" | "workflowApprovalsRequired"
+  | "state"
+  | "isDraft"
+  | "mergeability"
+  | "autoMergeEnabled"
+  | "workflowApprovalsRequired"
+  | "mergeBlockers"
 > & {
   readonly capabilities: Pick<
     PullRequestDetail["capabilities"],
@@ -120,6 +125,7 @@ export function mergeUnavailableReason(pr: ActionDetail, connectionAllowsWrites:
   if (!connectionAllowsWrites) return "This environment connection is read-only.";
   if (!pr.capabilities.actions.includes("merge"))
     return "This provider does not support merging here.";
+  if (pr.mergeBlockers?.length) return pr.mergeBlockers.join(" · ");
   if (!pr.viewerPermissions.actions.includes("merge"))
     return "Your account cannot merge this pull request.";
   if (pr.isDraft) return "Mark this draft ready for review before merging.";

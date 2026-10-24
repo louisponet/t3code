@@ -46,4 +46,12 @@ describe("mobile pull request actions", () => {
     expect(mergeUnavailableReason(pr, true)).toContain("conflicts");
     expect(mergeSummary(pr, true)).toBe("Has conflicts");
   });
+
+  it("gives the host's reason when it refuses to merge yet", () => {
+    const pr = detail({
+      mergeBlockers: ["Review obligations are not satisfied"],
+      viewerPermissions: { actions: [] },
+    });
+    expect(mergeUnavailableReason(pr, true)).toBe("Review obligations are not satisfied");
+  });
 });

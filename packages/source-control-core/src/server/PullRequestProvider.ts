@@ -193,6 +193,7 @@ export interface ProviderChangeRequestDetail extends ProviderChangeRequest {
   readonly autoMergeEnabled?: boolean;
   readonly autoMergeMethod?: PullRequestMergeMethod;
   readonly workflowApprovalsRequired?: number;
+  readonly mergeBlockers?: ReadonlyArray<string>;
 }
 
 export interface ProviderChangeRequestActivity {

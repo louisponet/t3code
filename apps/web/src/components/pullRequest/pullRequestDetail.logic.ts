@@ -73,6 +73,7 @@ export type PullRequestPrimaryControl =
   | "resolve"
   | "ready"
   | "merge"
+  | "merge-blocked"
   | "enable-auto-merge"
   | "auto-merge-armed"
   | "merged"
@@ -89,14 +90,15 @@ export function resolvePullRequestPrimaryControl(input: {
   readonly canMerge: boolean;
   readonly canMarkReady: boolean;
   readonly canEnableAutoMerge: boolean;
+  readonly mergeBlocked: boolean;
 }): PullRequestPrimaryControl {
   if (input.state === "merged") return "merged";
   if (input.state === "closed") return "closed";
   if (input.mergeability === "conflicting") return "resolve";
   if (input.isDraft) return input.canMarkReady ? "ready" : null;
   if (input.autoMergeEnabled) return "auto-merge-armed";
-  if (!input.hasMergeMethod) return null;
   if (
+    input.hasMergeMethod &&
     input.autoMergeEnabled === false &&
     input.checksState !== null &&
     input.checksState !== "passing" &&
@@ -104,7 +106,8 @@ export function resolvePullRequestPrimaryControl(input: {
   ) {
     return "enable-auto-merge";
   }
-  return input.canMerge ? "merge" : null;
+  if (input.hasMergeMethod && input.canMerge) return "merge";
+  return input.mergeBlocked ? "merge-blocked" : null;
 }
 
 export function pullRequestCheckoutCommand(
@@ -281,7 +284,13 @@ export function isStackedPullRequestBase(
 
 export type PullRequestActionableDetail = Pick<
   PullRequestDetail,
-  "state" | "isDraft" | "mergeability" | "capabilities" | "viewerPermissions" | "mergeCapabilities"
+  | "state"
+  | "isDraft"
+  | "mergeability"
+  | "capabilities"
+  | "viewerPermissions"
+  | "mergeCapabilities"
+  | "mergeBlockers"
 >;
 
 export function allowedPullRequestMergeMethods(
@@ -354,7 +363,7 @@ export function groupPullRequestChecks(checks: ReadonlyArray<PullRequestCheck>) 
   };
 }
 
-export type ThreadPanelPullRequestAction = "resolve" | "ready" | "fix" | "merge";
+export type ThreadPanelPullRequestAction = "resolve" | "ready" | "fix" | "merge" | "merge-blocked";
 
 export function resolveThreadPanelPullRequestAction(
   detail: (PullRequestActionableDetail & Pick<PullRequestDetail, "checks">) | null,
@@ -367,10 +376,13 @@ export function resolveThreadPanelPullRequestAction(
   const checks = classifyPullRequestChecks(detail.checks);
   if (checks === "failing") return "fix";
   if (checks === "pending") return null;
-  return canPerformPullRequestAction(detail, "merge") &&
+  if (
+    canPerformPullRequestAction(detail, "merge") &&
     allowedPullRequestMergeMethods(detail).length > 0
-    ? "merge"
-    : null;
+  ) {
+    return "merge";
+  }
+  return detail.mergeBlockers?.length ? "merge-blocked" : null;
 }
 
 export function orderPullRequestComments<T extends { readonly createdAt: string }>(
